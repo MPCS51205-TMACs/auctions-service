@@ -1,0 +1,62 @@
+version: "3.2"
+services:
+  rabbitmq-server:
+    image: rabbitmq:3-management        # image name
+    container_name: rabbitmq-server     # name the container
+    hostname: rabbitmq-server           # name the host
+    tty: true                           # boilerplate: allows -it basically ?
+    stdin_open: true                    # boilerplate: allows -it basically ?
+    networks:                           # allows containers to recognize the hostnames of other containers
+      - my-application-network
+    ports:
+      - "5672:5672"                     # for message traffic
+      - "15672:15672"                   # for managment console
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:15672"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+  postgres-server:
+    image: postgres-server:latest
+    container_name: postgres-server
+    hostname: postgres-server
+    environment:                        # sets environment variables
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=mysecret
+    volumes:
+      - ./auctions-service/db/create_db_and_empty_tables.sql:/docker-entrypoint-initdb.d/create_db_and_empty_tables.sql # runs if !exist data volume
+      - ./auctions-service/db/fill_tables_w_data.sql:/docker-entrypoint-initdb.d/fill_tables_w_data.sql # runs if !exist data volume
+      - pgdata:/var/lib/postgresql/data # allows persistence; see https://github.com/docker-library/postgres/issues/116
+    networks:
+      - my-application-network
+    ports:
+      - "3306:3306"                     # for managment
+      - "5432:5432"                     # for message traffic
+    restart: always
+  auctions-service:
+    image: auctions-service:latest
+    container_name: auctions-service
+    hostname: auctions-service
+    entrypoint: ./main inmemory         # execute the compiled main program (golang)
+    tty: true
+    stdin_open: true
+    restart: on-failure                 # restarts container when it goes down
+    volumes:
+      - ${PROJECT_DIR_PATH}/auctions-service:/go/src/auctions-service-debug # for debugging, mount src folder as separate folder
+    networks:
+      - my-application-network
+    ports:
+      - "10000:10000"                   # allows localhost and other containers to reach this container's [REST/HTTP API]
+                                        # other containers can ping this container [e.g. REST/HTTP API] with notations HOST:PORT=auctions-service:10000
+                                        # example from inside other container: "http://auction-service:10000/createAuction"
+                                        # example from localhost: "http://localhost:10000/createAuction"
+    depends_on:
+      - rabbitmq-server
+      - postgres-server
+
+networks:
+  my-application-network:
+    driver: bridge
+
+volumes:
+  pgdata: # clear persisted data with 'docker volume rm 51205-project_pgdata'
