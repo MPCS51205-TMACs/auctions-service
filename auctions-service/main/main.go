@@ -573,7 +573,7 @@ func main() {
 	// spawned without the original 3 terminating. should be refactored to use a bool channels
 	// that are passed into the spawned goroutines instead to avoid this issue.
 	alertCycle := time.Duration(10) * time.Second
-	finalizeCycle := time.Duration(10) * time.Second
+	finalizeCycle := time.Duration(6) * time.Second
 	loadAuctionCycle := time.Duration(10) * time.Second
 	auctionSessionManager := NewAuctionSessionManager(auctionservice, alertCycle, finalizeCycle, loadAuctionCycle)
 	auctionSessionManager.TurnOn()
@@ -581,6 +581,31 @@ func main() {
 	// spawn goroutines that will invoke auctionservice upon incoming HTTP/RESTful requests and messages
 	go handleHTTPAPIRequests(auctionservice)
 	go handleNewBids(auctionservice)
+
+	time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
+	time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
+	time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
+	time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
+	bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
+	bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
+	bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
+	bid4 := *domain.NewBid("104", "20", "katharine2", time4, int64(10), true)
+	bidRepo.SaveBid(&bid1)
+	bidRepo.SaveBid(&bid2)
+	bidRepo.SaveBid(&bid3)
+	bidRepo.SaveBid(&bid4)
+	bids := []*domain.Bid{&bid1, &bid2, &bid3, &bid4}
+
+	startime := time.Now()
+	endtime := startime.Add(time.Duration(10) * time.Minute)
+	item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
+	auction1 := domain.NewAuction(item1, &bids, nil, false, false, nil)         // will go to completion
+	auctionRepo.SaveAuction(auction1)
+
+	time.Sleep(time.Duration(5) * time.Second)
+
+	fmt.Println("canceling new auction")
+	auctionservice.StopAuction(item1.ItemId)
 
 	// lastTime := time.Now()
 	// for {

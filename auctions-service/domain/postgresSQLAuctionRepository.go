@@ -42,7 +42,7 @@ func NewPostgresSQLAuctionRepository(bidRepo BidRepository) AuctionRepository {
 	return &postgresSQLAuctionRepository{db, bidRepo}
 }
 
-type AuctionData struct {
+type SQLAuctionData struct {
 	ItemId             string
 	SellerUserId       string
 	StartPriceInCents  int
@@ -56,7 +56,7 @@ type AuctionData struct {
 
 func (repo *postgresSQLAuctionRepository) GetAuction(itemId string) *Auction {
 
-	var result AuctionData
+	var result SQLAuctionData
 
 	queryStr := "select auctions.*,auctionscancellations.timeCanceled,auctionsfinalizations.timeFinalized  from auctions \n" +
 		"left join auctionsfinalizations \n" +
@@ -124,7 +124,7 @@ func (repo *postgresSQLAuctionRepository) GetAuction(itemId string) *Auction {
 }
 
 func (repo *postgresSQLAuctionRepository) GetAuctions(leftBound time.Time, rightBound time.Time) []*Auction {
-	var result AuctionData
+	var result SQLAuctionData
 
 	queryStr := "select auctions.*,auctionsfinalizations.timeFinalized,auctionscancellations.timeCanceled from auctions \n" +
 		"left join auctionsfinalizations \n" +

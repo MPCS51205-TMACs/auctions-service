@@ -225,7 +225,7 @@ func (auctionservice *AuctionService) StopAuction(itemId string) AuctionInteract
 	}
 
 	// otherwise, ok to stop.
-	wasStopped := relevantAuction.Cancel(time.Now()) // should always return true?
+	wasStopped := relevantAuction.Stop(time.Now()) // should always return true?
 	if wasStopped {
 		auctionservice.auctionRepo.SaveAuction(relevantAuction)
 	}

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -28,6 +29,30 @@ type Auction struct {
 	sentStartSoonAlert bool
 	sentEndSoonAlert   bool
 	finalization       *Finalization
+}
+
+type AuctionData struct {
+	Item               *Item
+	Bids               []*Bid // slice of pointers to bids; new higher bids get appended on the end
+	Cancellation       *Cancellation
+	SentStartSoonAlert bool
+	SentEndSoonAlert   bool
+	Finalization       *Finalization
+}
+
+func NewAuctionData(Item *Item, Bids []*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization) *AuctionData {
+	return &AuctionData{Item, Bids, Cancellation, SentStartSoonAlert, SentEndSoonAlert, Finalization}
+}
+
+func (auction *Auction) ToAuctionData() *AuctionData {
+	return NewAuctionData(
+		auction.Item,
+		auction.bids,
+		auction.cancellation,
+		auction.sentStartSoonAlert,
+		auction.sentEndSoonAlert,
+		auction.finalization,
+	)
 }
 
 func NewAuction(item *Item, bids *[]*Bid, cancellation *Cancellation, sentStartSoonAlert, sentEndSoonAlert bool, finalization *Finalization) *Auction {
@@ -316,8 +341,8 @@ func (auction *Auction) Finalize(timeWhenFinalizationIssued time.Time) bool {
 	case state == CANCELED || state == OVER:
 		log.Printf("[Auction %s] finalizing self...\n", auction.Item.ItemId)
 		log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
-		sendAuctionDataToRabbitMQ("hello world!")
 		auction.finalization = NewFinalization(timeWhenFinalizationIssued)
+		sendAuctionDataToRabbitMQ(auction)
 		return true
 	default:
 		return false // state is PENDING, ACTIVE, FINALIZED
@@ -331,48 +356,67 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func sendAuctionDataToRabbitMQ(msg string) {
+func sendAuctionDataToRabbitMQ(auction *Auction) {
 
 	rabbitMqContainerHostName := "rabbitmq-server" // e.g. "localhost"
-	exchangeName := ""
-	queueName := "auctionEndData"
+	exchangeName := "auctionfinalizations"
+	queueName := ""
 
 	// make connection
 	connStr := fmt.Sprintf("amqp://guest:guest@%s:5672/", rabbitMqContainerHostName)
 	conn, err := amqp.Dial(connStr)
-
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
 
 	// create a channel
 	ch, err := conn.Channel()
-
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
-	// declare queue for us to send messages to
-	q, err := ch.QueueDeclare(
-		queueName, // name
-		false,     // durable
-		false,     // delete when unused
-		false,     // exclusive
-		false,     // no-wait
-		nil,       // arguments
+	// declare exchange
+	err = ch.ExchangeDeclare(
+		exchangeName, // name
+		"fanout",     // type
+		true,         // durable
+		false,        // auto-deleted
+		false,        // internal
+		false,        // no-wait
+		nil,          // arguments
 	)
-	failOnError(err, "Failed to declare a queue")
+	failOnError(err, "Failed to declare an exchange")
+
+	// // declare queue for us to send messages to
+	// q, err := ch.QueueDeclare(
+	// 	queueName, // name
+	// 	true,      // durable
+	// 	false,     // delete when unused
+	// 	false,     // exclusive
+	// 	false,     // no-wait
+	// 	nil,       // arguments
+	// )
+	// failOnError(err, "Failed to declare a queue")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	body := msg
+	body, err := json.Marshal(*(auction.ToAuctionData()))
+	// fmt.Println(body)
+	failOnError(err, "Error encoding JSON")
+
 	err = ch.PublishWithContext(ctx,
 		exchangeName, // exchange
-		q.Name,       // routing key
+		queueName,    // routing key WITH QUEUE q.Name
 		false,        // mandatory
 		false,        // immediate
 		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(body),
+			ContentType:  "application/json",
+			Body:         body,
+			DeliveryMode: amqp.Persistent,
 		})
+	// amqp.Publishing{
+	// 	ContentType: "text/plain",
+	// 	Body:        []byte(body),
+	// })
 	failOnError(err, "Failed to publish a message")
 	log.Printf(" [x] Sent %s\n", body)
 }
