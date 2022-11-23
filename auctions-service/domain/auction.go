@@ -1,8 +1,12 @@
 package domain
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go" // acquired by doing 'go get github.com/rabbitmq/amqp091-go'
 )
 
 // Enum that defines various states an auction can be in
@@ -310,13 +314,67 @@ func (auction *Auction) Finalize(timeWhenFinalizationIssued time.Time) bool {
 	state := auction.getStateAtTime(timeWhenFinalizationIssued)
 	switch {
 	case state == CANCELED || state == OVER:
-		log.Printf("[Auction %s] STUBBED finalizing self...\n", auction.Item.ItemId)
+		log.Printf("[Auction %s] finalizing self...\n", auction.Item.ItemId)
+		log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
+		sendAuctionDataToRabbitMQ("hello world!")
 		auction.finalization = NewFinalization(timeWhenFinalizationIssued)
 		return true
 	default:
 		return false // state is PENDING, ACTIVE, FINALIZED
 	}
 
+}
+
+func failOnError(err error, msg string) {
+	if err != nil {
+		log.Panicf("%s: %s", msg, err)
+	}
+}
+
+func sendAuctionDataToRabbitMQ(msg string) {
+
+	rabbitMqContainerHostName := "rabbitmq-server" // e.g. "localhost"
+	exchangeName := ""
+	queueName := "auctionEndData"
+
+	// make connection
+	connStr := fmt.Sprintf("amqp://guest:guest@%s:5672/", rabbitMqContainerHostName)
+	conn, err := amqp.Dial(connStr)
+
+	failOnError(err, "Failed to connect to RabbitMQ")
+	defer conn.Close()
+
+	// create a channel
+	ch, err := conn.Channel()
+
+	failOnError(err, "Failed to open a channel")
+	defer ch.Close()
+
+	// declare queue for us to send messages to
+	q, err := ch.QueueDeclare(
+		queueName, // name
+		false,     // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+	failOnError(err, "Failed to declare a queue")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	body := msg
+	err = ch.PublishWithContext(ctx,
+		exchangeName, // exchange
+		q.Name,       // routing key
+		false,        // mandatory
+		false,        // immediate
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(body),
+		})
+	failOnError(err, "Failed to publish a message")
+	log.Printf(" [x] Sent %s\n", body)
 }
 
 func (auction *Auction) hasBid(bidId string) bool {
