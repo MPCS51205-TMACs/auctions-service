@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"auctions-service/common"
+	"encoding/json"
 	"time"
 )
 
@@ -20,4 +22,20 @@ func NewItem(itemId, sellerUserId string, startTime, endTime time.Time, startPri
 		EndTime:           endTime.UTC(),
 		StartPriceInCents: startPriceInCents,
 	}
+}
+
+func (item *Item) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		ItemId            string `json:"item_id"`
+		SellerUserId      string `json:"seller_user_id"`
+		StartTime         string `json:"start_time"`
+		EndTime           string `json:"end_time"`
+		StartPriceInCents int64  `json:"start_price_in_cents"`
+	}{
+		ItemId:            item.ItemId,
+		SellerUserId:      item.SellerUserId,
+		StartTime:         common.TimeToSQLTimestamp6(item.StartTime),
+		EndTime:           common.TimeToSQLTimestamp6(item.EndTime),
+		StartPriceInCents: item.StartPriceInCents,
+	})
 }

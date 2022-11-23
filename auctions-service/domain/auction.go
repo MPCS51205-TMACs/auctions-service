@@ -341,8 +341,8 @@ func (auction *Auction) Finalize(timeWhenFinalizationIssued time.Time) bool {
 	case state == CANCELED || state == OVER:
 		log.Printf("[Auction %s] finalizing self...\n", auction.Item.ItemId)
 		log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
-		sendAuctionDataToRabbitMQ(auction)
 		auction.finalization = NewFinalization(timeWhenFinalizationIssued)
+		sendAuctionDataToRabbitMQ(auction)
 		return true
 	default:
 		return false // state is PENDING, ACTIVE, FINALIZED
