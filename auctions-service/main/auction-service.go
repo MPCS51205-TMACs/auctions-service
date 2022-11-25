@@ -75,8 +75,8 @@ func (auctionservice *AuctionService) CreateAuction(itemId, sellerUserId string,
 	}
 
 	// if auction to be created will start in sooner than 5 minutes, do not proceed
-	if creationTime.Add(time.Duration(5) * time.Minute).After(*startTime) {
-		log.Printf("[AuctionService] fail. Auction would start in <= 5 minutes. push back start time to later time.")
+	if creationTime.Add(time.Duration(1) * time.Minute).After(*startTime) {
+		log.Printf("[AuctionService] fail. Auction would start in <= 1 minute from now. push back start time to later time.")
 		// log.Printf("[AuctionService] UNLOCK")
 		auctionservice.mutex.Unlock()
 		return auctionWouldStartTooSoon
@@ -91,7 +91,7 @@ func (auctionservice *AuctionService) CreateAuction(itemId, sellerUserId string,
 	}
 
 	newItem := domain.NewItem(itemId, sellerUserId, *startTime, *endTime, startPriceInCents)
-	newAuction := domain.NewAuction(newItem, nil, nil, false, false, nil)
+	newAuction := auctionservice.auctionRepo.NewAuction(newItem, nil, nil, false, false, nil)
 
 	auctionservice.auctionRepo.SaveAuction(newAuction)                   // save Auction
 	auctionservice.inMemoryAuctions[newAuction.Item.ItemId] = newAuction // cache Auction
@@ -278,6 +278,44 @@ func (auctionservice *AuctionService) ProcessNewBid(itemId string, bidderUserId 
 	auctionservice.mutex.Unlock()
 
 	return auctionProcessedBid, auctionState, wasNewTopBid
+
+}
+
+func (auctionservice *AuctionService) ValidateBid(itemId string, bidderUserId string, timeReceived time.Time, amountInCents int64) (domain.AuctionState, bool) {
+
+	// log.Printf("[AuctionService] LOCK")
+	// NOT USING LOCK
+	// auctionservice.mutex.Lock()
+
+	log.Printf("[AuctionService] validating new bid request (itemId=%s;bidderUserId=%s;amountInCents=%d;time=%v)...", itemId, bidderUserId, amountInCents, timeReceived)
+
+	relevantAuction, ok := auctionservice.inMemoryAuctions[itemId] // lookup in cache
+	if !ok {
+		auctionservice.mutex.Lock()
+		relevantAuction = auctionservice.auctionRepo.GetAuction(itemId) // get from db if not cached
+		if relevantAuction == nil {
+			// log.Printf("[AuctionService] UNLOCK")
+			auctionservice.mutex.Unlock()
+			return domain.UNKNOWN, false // unknown auction state == auction not exist
+		}
+		auctionservice.inMemoryAuctions[itemId] = relevantAuction // cache it
+		auctionservice.mutex.Unlock()
+	}
+
+	auctionState := relevantAuction.GetStateAtTime(timeReceived)
+	// PENDING   AuctionState = "PENDING" // has not yet started
+	// ACTIVE    AuctionState = "ACTIVE"  // is happening now
+	// CANCELED  AuctionState = "CANCELED"
+	// OVER      AuctionState = "OVER"      // is over (but winner has not been declared and auction has not been "archived away")
+	// FINALIZED AuctionState = "FINALIZED" // is over and archived away; can delete
+	// UNKNOWN   AuctionState = "UKNOWN"
+
+	canAcceptBid := auctionState == domain.ACTIVE // it's only ok to place bid when auction is ACTIVE
+
+	// log.Printf("[AuctionService] UNLOCK")
+	// auctionservice.mutex.Unlock()
+
+	return auctionState, canAcceptBid
 
 }
 

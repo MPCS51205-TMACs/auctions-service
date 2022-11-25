@@ -72,3 +72,36 @@ func (bid *Bid) MarshalJSON() ([]byte, error) {
 		Active:        bid.active,
 	})
 }
+
+// Used to hold information for a newly received Bid request;
+// contains same information as the bid request + a time stamp
+// indicating when the bid was received.
+type RawBidData struct {
+	ItemId        string
+	BidderUserId  string
+	TimeReceived  string
+	AmountInCents int64 // to avoid floating point errors, store money as cents (int)
+}
+
+func NewRawBidData(itemId, bidderUserId string, timeReceived time.Time, ammountInCents int64) *RawBidData {
+	return &RawBidData{
+		ItemId:        itemId,
+		BidderUserId:  bidderUserId,
+		TimeReceived:  common.TimeToSQLTimestamp6(timeReceived.UTC()), // represent time in UTC
+		AmountInCents: ammountInCents,
+	}
+}
+
+// func (rawBidData *RawBidData) MarshalJSON() ([]byte, error) {
+// 	return json.Marshal(&struct {
+// 		ItemId        string `json:"item_id"`
+// 		BidderUserId  string `json:"bidder_user_id"`
+// 		TimeReceived  string `json:"time_received"`
+// 		AmountInCents int64  `json:"amount_in_cents"`
+// 	}{
+// 		ItemId:        rawBidData.ItemId,
+// 		BidderUserId:  rawBidData.BidderUserId,
+// 		TimeReceived:  common.TimeToSQLTimestamp6(rawBidData.TimeReceived),
+// 		AmountInCents: rawBidData.AmountInCents,
+// 	})
+// }

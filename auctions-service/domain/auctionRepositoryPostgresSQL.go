@@ -21,11 +21,12 @@ import (
 )
 
 type postgresSQLAuctionRepository struct {
-	db      *sql.DB
-	bidRepo BidRepository
+	db          *sql.DB
+	bidRepo     BidRepository
+	alertEngine AlertEngine
 }
 
-func NewPostgresSQLAuctionRepository(bidRepo BidRepository) AuctionRepository {
+func NewPostgresSQLAuctionRepository(bidRepo BidRepository, alertEngine AlertEngine) AuctionRepository {
 
 	postgresUsername := "postgres"
 	postgresPassword := "mysecret"
@@ -39,7 +40,7 @@ func NewPostgresSQLAuctionRepository(bidRepo BidRepository) AuctionRepository {
 		log.Fatal(err)
 	}
 
-	return &postgresSQLAuctionRepository{db, bidRepo}
+	return &postgresSQLAuctionRepository{db, bidRepo, alertEngine}
 }
 
 type SQLAuctionData struct {
@@ -115,7 +116,7 @@ func (repo *postgresSQLAuctionRepository) GetAuction(itemId string) *Auction {
 			finalization = NewFinalization(finalizationTime.Time)
 		}
 
-		auction := NewAuction(item, bids, cancellation, sentStartSoonAlert, sentEndSoonAlert, finalization)
+		auction := NewAuction(item, bids, cancellation, sentStartSoonAlert, sentEndSoonAlert, finalization, repo.alertEngine)
 
 		return auction
 
@@ -189,7 +190,7 @@ func (repo *postgresSQLAuctionRepository) GetAuctions(leftBound time.Time, right
 			finalization = NewFinalization(finalizationTime.Time)
 		}
 
-		auction := NewAuction(item, bids, cancellation, sentStartSoonAlert, sentEndSoonAlert, finalization)
+		auction := NewAuction(item, bids, cancellation, sentStartSoonAlert, sentEndSoonAlert, finalization, repo.alertEngine)
 		auctions = append(auctions, auction)
 
 	}
@@ -284,6 +285,10 @@ func (repo *postgresSQLAuctionRepository) SaveAuction(auctionToSave *Auction) {
 		debug.PrintStack()
 	}
 
+}
+
+func (repo *postgresSQLAuctionRepository) NewAuction(Item *Item, Bids *[]*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization) *Auction {
+	return NewAuction(Item, Bids, Cancellation, SentStartSoonAlert, SentEndSoonAlert, Finalization, repo.alertEngine)
 }
 
 func (repo *postgresSQLAuctionRepository) NumAuctionsSaved() int {

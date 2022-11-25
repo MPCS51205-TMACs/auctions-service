@@ -1,13 +1,11 @@
 package domain
 
 import (
-	"context"
-	"encoding/json"
+	"auctions-service/common"
 	"fmt"
 	"log"
 	"time"
-
-	amqp "github.com/rabbitmq/amqp091-go" // acquired by doing 'go get github.com/rabbitmq/amqp091-go'
+	// acquired by doing 'go get github.com/rabbitmq/amqp091-go'
 )
 
 // Enum that defines various states an auction can be in
@@ -29,6 +27,7 @@ type Auction struct {
 	sentStartSoonAlert bool
 	sentEndSoonAlert   bool
 	finalization       *Finalization
+	alertEngine        AlertEngine
 }
 
 type AuctionData struct {
@@ -38,10 +37,11 @@ type AuctionData struct {
 	SentStartSoonAlert bool
 	SentEndSoonAlert   bool
 	Finalization       *Finalization
+	WinningBid         *Bid
 }
 
-func NewAuctionData(Item *Item, Bids []*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization) *AuctionData {
-	return &AuctionData{Item, Bids, Cancellation, SentStartSoonAlert, SentEndSoonAlert, Finalization}
+func NewAuctionData(Item *Item, Bids []*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization, winningBid *Bid) *AuctionData {
+	return &AuctionData{Item, Bids, Cancellation, SentStartSoonAlert, SentEndSoonAlert, Finalization, winningBid}
 }
 
 func (auction *Auction) ToAuctionData() *AuctionData {
@@ -52,10 +52,11 @@ func (auction *Auction) ToAuctionData() *AuctionData {
 		auction.sentStartSoonAlert,
 		auction.sentEndSoonAlert,
 		auction.finalization,
+		auction.GetHighestActiveBid(),
 	)
 }
 
-func NewAuction(item *Item, bids *[]*Bid, cancellation *Cancellation, sentStartSoonAlert, sentEndSoonAlert bool, finalization *Finalization) *Auction {
+func NewAuction(item *Item, bids *[]*Bid, cancellation *Cancellation, sentStartSoonAlert, sentEndSoonAlert bool, finalization *Finalization, alertEngine AlertEngine) *Auction {
 	if bids == nil {
 		newBidsSlice := make([]*Bid, 0)
 		bids = &newBidsSlice
@@ -67,12 +68,13 @@ func NewAuction(item *Item, bids *[]*Bid, cancellation *Cancellation, sentStartS
 		sentStartSoonAlert: sentEndSoonAlert, // false if brand new
 		sentEndSoonAlert:   sentEndSoonAlert, // false if brand new
 		finalization:       finalization,     // nil if brand new
+		alertEngine:        alertEngine,
 	}
 }
 
 func (auction *Auction) ProcessNewBid(incomingBid *Bid) (AuctionState, bool) {
 	timeBidReceived := incomingBid.TimeReceived
-	stateWhenBidReceived := auction.getStateAtTime(timeBidReceived)
+	stateWhenBidReceived := auction.GetStateAtTime(timeBidReceived)
 
 	// if the auction has been finalized, it is archived and we are no longer
 	// considering new bids.
@@ -98,7 +100,14 @@ func (auction *Auction) ProcessNewBid(incomingBid *Bid) (AuctionState, bool) {
 			if incomingBid.AmountInCents >= auction.Item.StartPriceInCents { // bid amount must at least be start price
 				log.Printf("[Auction %s] new top bid!\n", auction.Item.ItemId)
 				auction.addBid(incomingBid)
-				auction.alertSeller("you have a new top bid!")
+
+				// send notification
+				var itemId *string = &auction.Item.ItemId
+				var seller *string = &auction.Item.SellerUserId
+				var formerTopBidder *string = nil
+				var newTopBidder *string = &incomingBid.BidderUserId
+				auction.alertEngine.SendNewTopBidAlert(itemId, seller, formerTopBidder, newTopBidder)
+
 				return ACTIVE, true
 			} else {
 				log.Printf("[Auction %s] ignoring bid. bid was under start price.\n", auction.Item.ItemId)
@@ -108,8 +117,16 @@ func (auction *Auction) ProcessNewBid(incomingBid *Bid) (AuctionState, bool) {
 			if incomingBid.Outbids(highestActiveBid) {
 				log.Printf("[Auction %s] new top bid!\n", auction.Item.ItemId)
 				auction.addBid(incomingBid)
-				auction.alertSeller("you have a new top bid!")
-				auction.alertBidder("your top bid has been out-matched!", highestActiveBid)
+				// auction.alertSeller("you have a new top bid!")
+				// auction.alertBidder("your top bid has been out-matched!", highestActiveBid)
+
+				// send notification
+				var itemId *string = &auction.Item.ItemId
+				var seller *string = &auction.Item.SellerUserId
+				var formerTopBidder *string = &highestActiveBid.BidderUserId
+				var newTopBidder *string = &incomingBid.BidderUserId
+				auction.alertEngine.SendNewTopBidAlert(itemId, seller, formerTopBidder, newTopBidder)
+
 				return ACTIVE, true
 			} else {
 				log.Printf("[Auction %s] ignoring bid. bid was under highest bid offer amount.\n", auction.Item.ItemId)
@@ -141,7 +158,7 @@ func (auction *Auction) GetHighestActiveBid() *Bid {
 	return auction.bids[idx]
 }
 
-func (auction *Auction) getStateAtTime(currTime time.Time) AuctionState {
+func (auction *Auction) GetStateAtTime(currTime time.Time) AuctionState {
 	// if auction has been cancelled, then if the time was
 	// after the time of the cancellation, then the state at that
 	// time is cancelled
@@ -181,15 +198,17 @@ func (auction *Auction) getStateAtTime(currTime time.Time) AuctionState {
 	panic("Auction.GetStateAtTime() couldn't determine auction state at time!")
 }
 
-func (auction *Auction) alertSeller(msg string) {
-	sellerUserId := auction.Item.SellerUserId
-	log.Printf("[Auction %s] STUBBED: sending out request to notify seller (userId=%s,msg=%s)\n", auction.Item.ItemId, sellerUserId, msg)
-}
+// func (auction *Auction) alertSeller(msg string) {
+// 	// sellerUserId := auction.Item.SellerUserId
+// 	// outgoingMsg := fmt.Sprintf("[Auction %s] notifying seller (userId=%s,msg=%s)\n", auction.Item.ItemId, sellerUserId, msg)
+// 	auction.alertEngine.AlertSeller(msg, auction.Item.ItemId, auction.Item.SellerUserId)
+// }
 
-func (auction *Auction) alertBidder(msg string, bid *Bid) {
-	bidderUserId := bid.BidderUserId
-	log.Printf("[Auction %s] STUBBED: sending out request to notify bidder (userId=%s,msg=%s)\n", auction.Item.ItemId, bidderUserId, msg)
-}
+// func (auction *Auction) alertBidder(msg string, bid *Bid) {
+// 	// bidderUserId := bid.BidderUserId
+// 	// outgoingMsg := fmt.Sprintf("[Auction %s] notifying bidder (userId=%s,msg=%s)\n", auction.Item.ItemId, bidderUserId, msg)
+// 	auction.alertEngine.AlertBidder(msg, bid)
+// }
 
 func (auction *Auction) Cancel(timeWhenCancellationIssued time.Time) bool {
 
@@ -201,7 +220,7 @@ func (auction *Auction) Cancel(timeWhenCancellationIssued time.Time) bool {
 
 	// otherwise, the auction is pending, active, or over.
 	// can only issue cancel if auction is pending or active and has no bids
-	stateWhenCancellationIssued := auction.getStateAtTime(timeWhenCancellationIssued)
+	stateWhenCancellationIssued := auction.GetStateAtTime(timeWhenCancellationIssued)
 	switch {
 	case stateWhenCancellationIssued == PENDING: //
 		auction.cancellation = NewCancellation(timeWhenCancellationIssued)
@@ -236,7 +255,7 @@ func (auction *Auction) Stop(timeWhenStopIssued time.Time) bool {
 
 	// otherwise, the auction is pending, active, or over.
 	// can only issue stop if auction is pending or active
-	stateWhenStopIssued := auction.getStateAtTime(timeWhenStopIssued)
+	stateWhenStopIssued := auction.GetStateAtTime(timeWhenStopIssued)
 	switch {
 	case stateWhenStopIssued == PENDING || stateWhenStopIssued == ACTIVE:
 		auction.cancellation = NewCancellation(timeWhenStopIssued)
@@ -263,7 +282,7 @@ func (auction *Auction) DeactivateUserBids(userId string, timeWhenUserDeactivate
 	// the request to deactivate user's bids comes in; this is the only situation where
 	// we refused a deactivateUserBids request
 	log.Printf("[Auction %s] de-activating user's bids (userId=%s)\n", auction.Item.ItemId, userId)
-	stateWhenUserDeactivated := auction.getStateAtTime(timeWhenUserDeactivated)
+	stateWhenUserDeactivated := auction.GetStateAtTime(timeWhenUserDeactivated)
 	bidsToSave := []*Bid{}
 	if stateWhenUserDeactivated == FINALIZED {
 		return &bidsToSave, false
@@ -283,7 +302,7 @@ func (auction *Auction) DeactivateUserBids(userId string, timeWhenUserDeactivate
 func (auction *Auction) ActivateUserBids(userId string, timeWhenUserActivated time.Time) (*[]*Bid, bool) {
 
 	log.Printf("[Auction %s] activating user's bids (userId=%s)\n", auction.Item.ItemId, userId)
-	stateWhenUserActivated := auction.getStateAtTime(timeWhenUserActivated)
+	stateWhenUserActivated := auction.GetStateAtTime(timeWhenUserActivated)
 	bidsToSave := []*Bid{}
 	if stateWhenUserActivated == FINALIZED {
 		return &bidsToSave, false
@@ -301,7 +320,7 @@ func (auction *Auction) ActivateUserBids(userId string, timeWhenUserActivated ti
 }
 
 func (auction *Auction) IsOverOrCanceledAtTime(atTime time.Time) bool {
-	stateAtTime := auction.getStateAtTime(atTime)
+	stateAtTime := auction.GetStateAtTime(atTime)
 	if stateAtTime == OVER || stateAtTime == CANCELED {
 		return true
 	}
@@ -309,22 +328,22 @@ func (auction *Auction) IsOverOrCanceledAtTime(atTime time.Time) bool {
 }
 
 func (auction *Auction) IsPending(nowTime time.Time) bool {
-	stateAtTime := auction.getStateAtTime(nowTime)
+	stateAtTime := auction.GetStateAtTime(nowTime)
 	return stateAtTime == PENDING
 }
 
 func (auction *Auction) IsActive(nowTime time.Time) bool {
-	stateAtTime := auction.getStateAtTime(nowTime)
+	stateAtTime := auction.GetStateAtTime(nowTime)
 	return stateAtTime == ACTIVE
 }
 
 func (auction *Auction) IsCanceled(nowTime time.Time) bool {
-	stateAtTime := auction.getStateAtTime(nowTime)
+	stateAtTime := auction.GetStateAtTime(nowTime)
 	return stateAtTime == CANCELED
 }
 
 func (auction *Auction) IsFinalized(nowTime time.Time) bool {
-	stateAtTime := auction.getStateAtTime(nowTime)
+	stateAtTime := auction.GetStateAtTime(nowTime)
 	return stateAtTime == FINALIZED
 }
 
@@ -336,13 +355,14 @@ func (auction *Auction) Finalize(timeWhenFinalizationIssued time.Time) bool {
 	}
 
 	// finalization only allowed when auction is canceled or over
-	state := auction.getStateAtTime(timeWhenFinalizationIssued)
+	state := auction.GetStateAtTime(timeWhenFinalizationIssued)
 	switch {
 	case state == CANCELED || state == OVER:
 		log.Printf("[Auction %s] finalizing self...\n", auction.Item.ItemId)
-		log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
+		// log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
 		auction.finalization = NewFinalization(timeWhenFinalizationIssued)
-		sendAuctionDataToRabbitMQ(auction)
+		auction.alertEngine.sendAuctionEndAlert(auction.ToAuctionData())
+		// sendAuctionDataToRabbitMQ(auction)
 		return true
 	default:
 		return false // state is PENDING, ACTIVE, FINALIZED
@@ -354,71 +374,6 @@ func failOnError(err error, msg string) {
 	if err != nil {
 		log.Panicf("%s: %s", msg, err)
 	}
-}
-
-func sendAuctionDataToRabbitMQ(auction *Auction) {
-
-	rabbitMqContainerHostName := "rabbitmq-server" // e.g. "localhost"
-	exchangeName := "auctionfinalizations"
-	queueName := ""
-
-	// make connection
-	connStr := fmt.Sprintf("amqp://guest:guest@%s:5672/", rabbitMqContainerHostName)
-	conn, err := amqp.Dial(connStr)
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
-
-	// create a channel
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
-
-	// declare exchange
-	err = ch.ExchangeDeclare(
-		exchangeName, // name
-		"fanout",     // type
-		true,         // durable
-		false,        // auto-deleted
-		false,        // internal
-		false,        // no-wait
-		nil,          // arguments
-	)
-	failOnError(err, "Failed to declare an exchange")
-
-	// // declare queue for us to send messages to
-	// q, err := ch.QueueDeclare(
-	// 	queueName, // name
-	// 	true,      // durable
-	// 	false,     // delete when unused
-	// 	false,     // exclusive
-	// 	false,     // no-wait
-	// 	nil,       // arguments
-	// )
-	// failOnError(err, "Failed to declare a queue")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	body, err := json.Marshal(*(auction.ToAuctionData()))
-	// fmt.Println(body)
-	failOnError(err, "Error encoding JSON")
-
-	err = ch.PublishWithContext(ctx,
-		exchangeName, // exchange
-		queueName,    // routing key WITH QUEUE q.Name
-		false,        // mandatory
-		false,        // immediate
-		amqp.Publishing{
-			ContentType:  "application/json",
-			Body:         body,
-			DeliveryMode: amqp.Persistent,
-		})
-	// amqp.Publishing{
-	// 	ContentType: "text/plain",
-	// 	Body:        []byte(body),
-	// })
-	failOnError(err, "Failed to publish a message")
-	log.Printf(" [x] Sent %s\n", body)
 }
 
 func (auction *Auction) hasBid(bidId string) bool {
@@ -439,7 +394,8 @@ func (auction *Auction) OverlapsWith(leftBound *time.Time, rightBound *time.Time
 
 func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 	nowTime := time.Now()
-	stateNow := auction.getStateAtTime(nowTime) // send start soon alert if in pending state; send active now alert if in active state
+	nowTimeStr := nowTime.Format("2006-01-02 15:04:05")
+	stateNow := auction.GetStateAtTime(nowTime) // send start soon alert if in pending state; send active now alert if in active state
 
 	if !auction.sentStartSoonAlert {
 
@@ -451,9 +407,11 @@ func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 
 			if hours < 1 { // send alert if auction is active and end is within 1 hour from now
 				if mins < 60 {
-					log.Printf("[Auction %s] STUBBED sending out starting soon alert; starts in (%f minutes)\n", auction.Item.ItemId, mins)
+					msg := fmt.Sprintf("[%s] Auction for item_id=%s starts in (%f minutes)\n", nowTimeStr, auction.Item.ItemId, mins)
+					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 				} else {
-					log.Printf("[Auction %s] STUBBED sending out starting soon alert; starts in (%f hours)\n", auction.Item.ItemId, hours)
+					msg := fmt.Sprintf("[%s] Auction for item_id=%s starts in (%f hours)\n", nowTimeStr, auction.Item.ItemId, hours)
+					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 				}
 
 				auction.sentStartSoonAlert = true
@@ -467,9 +425,11 @@ func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 			mins := timeSinceStart.Minutes()
 
 			if mins < 60 {
-				log.Printf("[Auction %s] STUBBED sending out starting soon alert; auction started (%f minutes) ago!\n", auction.Item.ItemId, mins)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s; auction started (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
+				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			} else {
-				log.Printf("[Auction %s] STUBBED sending out starting soon alert; auction started (%f minutes) ago!\n", auction.Item.ItemId, hours)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s; auction started (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
+				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			}
 
 			auction.sentStartSoonAlert = true
@@ -525,7 +485,8 @@ func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 
 	nowTime := time.Now()
-	stateNow := auction.getStateAtTime(nowTime) // send end soon alert if in active state; send ended earlier if in over, canceled, completed state
+	nowTimeStr := common.TimeToSQLTimestamp6(nowTime)
+	stateNow := auction.GetStateAtTime(nowTime) // send end soon alert if in active state; send ended earlier if in over, canceled, completed state
 
 	if !auction.sentEndSoonAlert {
 
@@ -535,10 +496,13 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 			mins := timeUntilEnd.Minutes()
 
 			if hours < 1 { // send alert if auction is active and end is within 1 hour from now
+
 				if mins < 60 {
-					log.Printf("[Auction %s] STUBBED sending out ending soon alert; ends in (%f minutes)\n", auction.Item.ItemId, mins)
+					msg := fmt.Sprintf("[%s] Auction for item_id=%s ends in (%f minutes)\n", nowTimeStr, auction.Item.ItemId, mins)
+					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 				} else {
-					log.Printf("[Auction %s] STUBBED sending out ending soon alert; ends in (%f hours)\n", auction.Item.ItemId, hours)
+					msg := fmt.Sprintf("[%s] Auction for item_id=%s ends in (%f hours)\n", nowTimeStr, auction.Item.ItemId, hours)
+					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 				}
 
 				auction.sentEndSoonAlert = true
@@ -551,9 +515,11 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 			mins := timeSinceEnd.Minutes()
 
 			if mins < 60 {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction ended (%f minutes) ago!\n", auction.Item.ItemId, mins)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s ended (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			} else {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction ended (%f hours) ago!\n", auction.Item.ItemId, hours)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s ended (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			}
 
 			auction.sentEndSoonAlert = true
@@ -566,9 +532,11 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 			mins := timeSinceCancel.Minutes()
 
 			if mins < 60 {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction was canceled (%f minutes) ago!\n", auction.Item.ItemId, mins)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s was canceled (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			} else {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction was canceled (%f hours) ago!\n", auction.Item.ItemId, hours)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s was canceled (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			}
 
 			auction.sentEndSoonAlert = true
@@ -581,9 +549,11 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 			mins := timeSinceFinalization.Minutes()
 
 			if mins < 60 {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction was finalized (%f minutes) ago!\n", auction.Item.ItemId, mins)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s was finalized (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			} else {
-				log.Printf("[Auction %s] STUBBED sending out ending soon alert; auction was finalized (%f hours) ago!\n", auction.Item.ItemId, hours)
+				msg := fmt.Sprintf("[%s] Auction for item_id=%s was finalized (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
 			}
 
 			auction.sentEndSoonAlert = true

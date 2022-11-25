@@ -5,12 +5,13 @@ import (
 )
 
 type inMemoryAuctionRepository struct {
-	auctions []*Auction
+	auctions    []*Auction
+	alertEngine AlertEngine
 }
 
-func NewInMemoryAuctionRepository() AuctionRepository {
+func NewInMemoryAuctionRepository(alertEngine AlertEngine) AuctionRepository {
 	auctions := []*Auction{}
-	return &inMemoryAuctionRepository{auctions}
+	return &inMemoryAuctionRepository{auctions, alertEngine}
 }
 
 func (repo *inMemoryAuctionRepository) GetAuction(itemId string) *Auction {
@@ -41,6 +42,10 @@ func (repo *inMemoryAuctionRepository) SaveAuction(auctionToSave *Auction) {
 	}
 	// else its new
 	repo.auctions = append(repo.auctions, auctionToSave)
+}
+
+func (repo *inMemoryAuctionRepository) NewAuction(Item *Item, Bids *[]*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization) *Auction {
+	return NewAuction(Item, Bids, Cancellation, SentStartSoonAlert, SentEndSoonAlert, Finalization, repo.alertEngine)
 }
 
 func (repo *inMemoryAuctionRepository) NumAuctionsSaved() int {

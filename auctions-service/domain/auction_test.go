@@ -8,12 +8,13 @@ import (
 )
 
 func TestProcessBid(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
-	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)             // 30 min later
-	item1 := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	item2 := NewItem("102", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item1, nil, nil, false, false, nil)            // will go to completion
-	auction2 := NewAuction(item2, nil, nil, false, false, nil)            // will get cancelled halfway through
+	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)               // 30 min later
+	item1 := NewItem("101", "asclark109", startime, endtime, int64(2000))   // $20 start price
+	item2 := NewItem("102", "asclark109", startime, endtime, int64(2000))   // $20 start price
+	auction1 := NewAuction(item1, nil, nil, false, false, nil, alertEngine) // will go to completion
+	auction2 := NewAuction(item2, nil, nil, false, false, nil, alertEngine) // will get cancelled halfway through
 
 	time1 := startime.Add(-time.Duration(30) * time.Minute)     // 30 min before auction start;   $0.12; ignored
 	time2 := startime.Add(-time.Duration(1) * time.Microsecond) // 1 microsecond before start;  $400.00; ignored
@@ -97,10 +98,11 @@ func TestProcessBid(t *testing.T) {
 }
 
 func TestGetHighestActiveBid(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item, nil, nil, false, false, nil)
+	auction1 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
 
 	timeBidsReceived := startime.Add(time.Duration(15) * time.Second) // 15 seconds into auctions tart
 
@@ -168,10 +170,11 @@ func TestGetHighestActiveBid(t *testing.T) {
 }
 
 func TestAddBidHasBid(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item, nil, nil, false, false, nil)
+	auction1 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
 
 	timeBid1Received := startime.Add(time.Duration(15) * time.Minute) // 10 min after auction start
 	timeBid2Received := startime.Add(time.Duration(16) * time.Minute) // 11 min after auction start
@@ -208,19 +211,20 @@ func TestAddBidHasBid(t *testing.T) {
 }
 
 func TestStopAuction(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item, nil, nil, false, false, nil)
-	auction2 := NewAuction(item, nil, nil, false, false, nil)
+	auction1 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction2 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
 	bid := NewBid("100", "101", "clark", startime, int64(3000), true)
 	bids := make([]*Bid, 1)
 	bids[0] = bid
-	auction2wbid := NewAuction(item, &bids, nil, false, false, nil) // have this auction have an active bid
-	auction3 := NewAuction(item, nil, nil, false, false, nil)
-	auction4 := NewAuction(item, nil, nil, false, false, nil) // have this auction already be canceled
+	auction2wbid := NewAuction(item, &bids, nil, false, false, nil, alertEngine) // have this auction have an active bid
+	auction3 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction4 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction already be canceled
 	auction4.Cancel(startime)
-	auction5 := NewAuction(item, nil, nil, false, false, nil) // have this auction be finalized
+	auction5 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction be finalized
 	auction5.Finalize(endtime.Add(time.Duration(1) * time.Minute))
 
 	stopTime1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC) // before auction starts
@@ -255,15 +259,16 @@ func TestStopAuction(t *testing.T) {
 }
 
 func TestCancelAuction(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item, nil, nil, false, false, nil)
-	auction2 := NewAuction(item, nil, nil, false, false, nil)
-	auction3 := NewAuction(item, nil, nil, false, false, nil)
-	auction4 := NewAuction(item, nil, nil, false, false, nil) // have this auction already be canceled
+	auction1 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction2 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction3 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction4 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction already be canceled
 	auction4.Cancel(startime)
-	auction5 := NewAuction(item, nil, nil, false, false, nil) // have this auction be finalized
+	auction5 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction be finalized
 	auction5.Finalize(endtime.Add(time.Duration(1) * time.Minute))
 
 	cancelTime1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC) // before auction starts
@@ -297,15 +302,16 @@ func TestCancelAuction(t *testing.T) {
 }
 
 func TestFinalizeAuction(t *testing.T) {
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := NewAuction(item, nil, nil, false, false, nil)
-	auction2 := NewAuction(item, nil, nil, false, false, nil)
-	auction3 := NewAuction(item, nil, nil, false, false, nil)
-	auction4 := NewAuction(item, nil, nil, false, false, nil) // have this auction already be canceled
+	auction1 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction2 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction3 := NewAuction(item, nil, nil, false, false, nil, alertEngine)
+	auction4 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction already be canceled
 	auction4.Cancel(startime)
-	auction5 := NewAuction(item, nil, nil, false, false, nil) // have this auction be finalized
+	auction5 := NewAuction(item, nil, nil, false, false, nil, alertEngine) // have this auction be finalized
 	auction5.Finalize(endtime.Add(time.Duration(1) * time.Minute))
 
 	finalizetime1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC) // before auction starts
@@ -339,16 +345,16 @@ func TestFinalizeAuction(t *testing.T) {
 }
 
 func TestGetStateAtTime(t *testing.T) {
-
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // end: 30 min later
 	finalizetime := endtime.Add(time.Duration(20) * time.Minute)         // finalized 20 min after end
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
 
-	auction := NewAuction(item, nil, nil, false, false, nil) // uncanceled auction
+	auction := NewAuction(item, nil, nil, false, false, nil, alertEngine) // uncanceled auction
 	auction.Finalize(finalizetime)
 
-	auction_cancelled := NewAuction(item, nil, nil, false, false, nil) // auction cancelled 15 min into auction start (30 min long auction)
+	auction_cancelled := NewAuction(item, nil, nil, false, false, nil, alertEngine) // auction cancelled 15 min into auction start (30 min long auction)
 	canceltime := time.Date(2014, 2, 4, 01, 15, 00, 0, time.UTC)
 	finalizetime2 := canceltime.Add(time.Duration(5) * time.Minute) // finalized 5 min after cancellation
 	auction_cancelled.Cancel(canceltime)
@@ -388,7 +394,7 @@ func TestGetStateAtTime(t *testing.T) {
 		expectedState := test.expected
 		testname := fmt.Sprintf("T=%v", num)
 		t.Run(testname, func(t *testing.T) {
-			calcdState := auction.getStateAtTime(currTime)
+			calcdState := auction.GetStateAtTime(currTime)
 			if calcdState != expectedState {
 				t.Errorf("\nRan:%s\nExpected:%s\nGot:%s", "auction.GetStateAtTime(currTime)", expectedState, calcdState)
 			}
@@ -397,12 +403,12 @@ func TestGetStateAtTime(t *testing.T) {
 }
 
 func TestOverlapsWith(t *testing.T) {
-
+	alertEngine := NewConsoleAlertEngine()
 	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)            // 30 min later
 	item := NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
 
-	auction := NewAuction(item, nil, nil, false, false, nil) // uncanceled auction
+	auction := NewAuction(item, nil, nil, false, false, nil, alertEngine) // uncanceled auction
 
 	time1 := time.Date(2014, 2, 4, 00, 30, 00, 0, time.UTC)     // 30 min before auction start
 	time2 := startime.Add(-time.Duration(1) * time.Microsecond) // 1 microsecond before start

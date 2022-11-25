@@ -202,7 +202,7 @@ func createAuction(auctionservice *AuctionService) http.HandlerFunc {
 		var requestBody RequestCreateAuction // parse request into a struct with assumed structure
 		err := json.NewDecoder(r.Body).Decode(&requestBody)
 
-		fmt.Println(requestBody)
+		log.Println("[main] [.] create auction: ", requestBody)
 		var response ResponseCreateAuction
 
 		w.Header().Set("Content-Type", "application/json")
@@ -243,7 +243,7 @@ func createAuction(auctionservice *AuctionService) http.HandlerFunc {
 		}
 
 		if createAuctionOutcome == auctionWouldStartTooSoon {
-			response.Msg = "an auction cannot be created within 2 hours before auction start. schedule the auction for a later time."
+			response.Msg = "an auction cannot be created within 1 minute before auction start. schedule the auction for a later time."
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
@@ -269,17 +269,55 @@ func createAuction(auctionservice *AuctionService) http.HandlerFunc {
 	}
 }
 
-func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
+func createNewBid(auctionservice *AuctionService, ch *amqp.Channel, newBidExchangeName, newBidQueueName string) http.HandlerFunc {
+
+	// // // create channel with rabbitMQ;
+	// ch, err := conn.Channel()
+	// failOnError(err, "Failed to open a channel")
+	// defer ch.Close()
+
+	// declare exchange
+	err := ch.ExchangeDeclare(
+		newBidExchangeName, // name
+		"fanout",           // type CHANGE TO FANOUT IF REFACTORING TO INCLUDE REAL-TIME-VIEWS
+		true,               // durable
+		false,              // auto-deleted
+		false,              // internal
+		false,              // no-wait
+		nil,                // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+newBidExchangeName)
+
+	// declare queue for us to send messages to
+	_, err = ch.QueueDeclare(
+		newBidQueueName, // name
+		true,            // durable ORIGINALLY FALSE
+		false,           // delete when unused
+		false,           // exclusive
+		false,           // no-wait
+		nil,             // arguments
+	)
+	failOnError(err, "Failed to declare queue: "+newBidQueueName)
+
+	err = ch.QueueBind(
+		newBidQueueName,    // queue name; ORIGINALLY q.Name
+		"",                 // routing key
+		newBidExchangeName, // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind a queue")
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		// var res itemIds
 		// vars := mux.Vars(r)
 		// itemId := vars["itemId"]
 
-		var requestBody RequestProcessNewBid // parse request into a struct with assumed structure
+		var requestBody RequestCreateNewBid // parse request into a struct with assumed structure
 		err := json.NewDecoder(r.Body).Decode(&requestBody)
 
-		fmt.Println(requestBody)
-		var response ResponseProcessNewBid
+		log.Println("[main] [.] create new bid: ", requestBody)
+		var response ResponseCreateNewBid
 
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
@@ -290,6 +328,13 @@ func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
 			return
 		}
 
+		// PENDING   AuctionState = "PENDING" // has not yet started
+		// ACTIVE    AuctionState = "ACTIVE"  // is happening now
+		// CANCELED  AuctionState = "CANCELED"
+		// OVER      AuctionState = "OVER"      // is over (but winner has not been declared and auction has not been "archived away")
+		// FINALIZED AuctionState = "FINALIZED" // is over and archived away; can delete
+		// UNKNOWN   AuctionState = "UKNOWN"
+
 		itemId := requestBody.ItemId
 		bidderUserId := requestBody.BidderUserId
 		timeReceived := time.Now()
@@ -297,17 +342,63 @@ func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
 
 		if amountInCents < 0 {
 			response.Msg = "bid money amount was negative integer."
-			response.WasNewTopBid = false
+			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		auctionInteractionOutcome, auctionState, wasNewTopBid := auctionservice.ProcessNewBid(itemId, bidderUserId, timeReceived, amountInCents)
+		auctionState, isAcceptableBid := auctionservice.ValidateBid(itemId, bidderUserId, timeReceived, amountInCents) // rarely requests lock
 
-		if auctionInteractionOutcome == auctionNotExist {
+		if isAcceptableBid {
+			// publish new Bid to RabbitMQ; will process bid later
+
+			rawBidData := domain.NewRawBidData(itemId, bidderUserId, timeReceived, amountInCents)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			body, err := json.Marshal(rawBidData)
+			// fmt.Println(body)
+			failOnError(err, "[main] Error encoding JSON")
+
+			// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ (item_id=%s)\n", auctionData.Item.ItemId)
+			// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
+			err = ch.PublishWithContext(ctx,
+				newBidExchangeName, // exchange
+				newBidQueueName,    // routing key WITH QUEUE q.Name
+				false,              // mandatory
+				false,              // immediate
+				amqp.Publishing{
+					ContentType:  "application/json",
+					Body:         body,
+					DeliveryMode: amqp.Persistent,
+				})
+			// amqp.Publishing{
+			// 	ContentType: "text/plain",
+			// 	Body:        []byte(body),
+			// })
+			// failOnError(err, "[main] Failed to publish a message")
+			if err != nil {
+				log.Println(err)
+				response.Msg = "bid was well-formed, but system failed to save bid (likely, system was disconnected from RabbitMQ)"
+				// response.WasNewTopBid = false
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			// else, success
+			log.Printf("[main] [x] Sent validated bid data to RabbitMQ\n")
+			response.Msg = fmt.Sprintf("system has received your bid at %s [UTC]", common.TimeToSQLTimestamp6(timeReceived))
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// else the bid is not acceptable for some reason
+		if auctionState == domain.UNKNOWN {
 			response.Msg = "auction does not exist."
-			response.WasNewTopBid = false
+			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
@@ -315,7 +406,7 @@ func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
 
 		if auctionState == domain.PENDING {
 			response.Msg = "auction has not yet started."
-			response.WasNewTopBid = false
+			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
@@ -323,7 +414,7 @@ func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
 
 		if auctionState == domain.OVER {
 			response.Msg = "auction is already over."
-			response.WasNewTopBid = false
+			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
@@ -331,32 +422,206 @@ func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
 
 		if auctionState == domain.FINALIZED {
 			response.Msg = "auction has already been finalized (archived)."
-			response.WasNewTopBid = false
+			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		if auctionState == domain.ACTIVE && !wasNewTopBid {
-			response.Msg = "bid was not a new top bid because it was under start price or under the current top bid price."
-			response.WasNewTopBid = false
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
+		// if auctionState == domain.ACTIVE && !wasNewTopBid {
+		// 	response.Msg = "bid was not a new top bid because it was under start price or under the current top bid price."
+		// 	response.WasNewTopBid = false
+		// 	w.WriteHeader(http.StatusBadRequest)
+		// 	json.NewEncoder(w).Encode(response)
+		// 	return
+		// }
 
-		// success case 2
-		if auctionState == domain.ACTIVE && wasNewTopBid {
-			response.Msg = "successfully processed bid; bid was new top bid!"
-			response.WasNewTopBid = true
-			json.NewEncoder(w).Encode(response)
-			return
-		}
+		// // success case 2
+		// if auctionState == domain.ACTIVE && wasNewTopBid {
+		// 	response.Msg = "successfully processed bid; bid was new top bid!"
+		// 	response.WasNewTopBid = true
+		// 	json.NewEncoder(w).Encode(response)
+		// 	return
+		// }
 
-		panic("see processNewBid() in main.go; could not determine an outcome for place new Bid request")
+		panic("see createNewBid() in main.go; could not determine an outcome for request to place new Bid")
 
 	}
 }
+
+// func processNewBid(auctionservice *AuctionService) http.HandlerFunc {
+
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// var res itemIds
+// 		// vars := mux.Vars(r)
+// 		// itemId := vars["itemId"]
+
+// 		var requestBody RequestProcessNewBid // parse request into a struct with assumed structure
+// 		err := json.NewDecoder(r.Body).Decode(&requestBody)
+
+// 		if err != nil {
+// 			return
+// 		}
+
+// 		// fmt.Println(requestBody)
+// 		log.Println("[main] [.] process bid: ", requestBody)
+// 		// var response ResponseProcessNewBid
+
+// 		// w.Header().Set("Content-Type", "application/json")
+// 		// if err != nil {
+// 		// 	w.WriteHeader(http.StatusBadRequest)
+// 		// 	response.Msg = "request body was ill-formed"
+
+// 		// 	json.NewEncoder(w).Encode(response)
+// 		// 	return
+// 		// }
+
+// 		itemId := requestBody.ItemId
+// 		bidderUserId := requestBody.BidderUserId
+// 		timeReceived, _ := common.InterpretTimeStr(requestBody.TimeReceived)
+// 		amountInCents := requestBody.AmountInCents
+
+// 		if amountInCents < 0 {
+// 			msg := "bid money amount was negative integer."
+// 			// response.WasNewTopBid = false
+// 			// w.WriteHeader(http.StatusBadRequest)
+// 			// json.NewEncoder(w).Encode(response)
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		auctionInteractionOutcome, auctionState, wasNewTopBid := auctionservice.ProcessNewBid(itemId, bidderUserId, *timeReceived, amountInCents)
+
+// 		if auctionInteractionOutcome == auctionNotExist {
+// 			msg := "auction does not exist."
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		if auctionState == domain.PENDING {
+// 			msg := "auction has not yet started."
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		if auctionState == domain.OVER {
+// 			msg := "auction is already over."
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		if auctionState == domain.FINALIZED {
+// 			msg := "auction has already been finalized (archived)."
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		if auctionState == domain.ACTIVE && !wasNewTopBid {
+// 			msg := "bid was not a new top bid because it was under start price or under the current top bid price."
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		// success case 2
+// 		if auctionState == domain.ACTIVE && wasNewTopBid {
+// 			msg := "successfully processed bid; bid was new top bid!"
+// 			log.Println(msg)
+// 			return
+// 		}
+
+// 		panic("see processNewBid() in main.go; could not determine an outcome for place new Bid request")
+
+// 	}
+// }
+
+// func createAndProcessNewBid(auctionservice *AuctionService) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// var res itemIds
+// 		// vars := mux.Vars(r)
+// 		// itemId := vars["itemId"]
+
+// 		var requestBody RequestProcessNewBid // parse request into a struct with assumed structure
+// 		err := json.NewDecoder(r.Body).Decode(&requestBody)
+
+// 		fmt.Println(requestBody)
+// 		var response ResponseProcessNewBid
+
+// 		w.Header().Set("Content-Type", "application/json")
+// 		if err != nil {
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			response.Msg = "request body was ill-formed"
+
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		itemId := requestBody.ItemId
+// 		bidderUserId := requestBody.BidderUserId
+// 		timeReceived := time.Now()
+// 		amountInCents := requestBody.AmountInCents
+
+// 		if amountInCents < 0 {
+// 			response.Msg = "bid money amount was negative integer."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		auctionInteractionOutcome, auctionState, wasNewTopBid := auctionservice.ProcessNewBid(itemId, bidderUserId, timeReceived, amountInCents)
+
+// 		if auctionInteractionOutcome == auctionNotExist {
+// 			response.Msg = "auction does not exist."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		if auctionState == domain.PENDING {
+// 			response.Msg = "auction has not yet started."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		if auctionState == domain.OVER {
+// 			response.Msg = "auction is already over."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		if auctionState == domain.FINALIZED {
+// 			response.Msg = "auction has already been finalized (archived)."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		if auctionState == domain.ACTIVE && !wasNewTopBid {
+// 			response.Msg = "bid was not a new top bid because it was under start price or under the current top bid price."
+// 			response.WasNewTopBid = false
+// 			w.WriteHeader(http.StatusBadRequest)
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		// success case 2
+// 		if auctionState == domain.ACTIVE && wasNewTopBid {
+// 			response.Msg = "successfully processed bid; bid was new top bid!"
+// 			response.WasNewTopBid = true
+// 			json.NewEncoder(w).Encode(response)
+// 			return
+// 		}
+
+// 		panic("see processNewBid() in main.go; could not determine an outcome for place new Bid request")
+
+// 	}
+// }
 
 func failOnError(err error, msg string) {
 	if err != nil {
@@ -364,75 +629,96 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func publishNotif(w http.ResponseWriter, r *http.Request) {
-	// make connection
-	conn, err := amqp.Dial("amqp://guest:guest@rabbitmq-server:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
+// func publishNotif(w http.ResponseWriter, r *http.Request) {
+// 	// make connection
+// 	conn, err := amqp.Dial("amqp://guest:guest@rabbitmq-server:5672/")
+// 	failOnError(err, "Failed to connect to RabbitMQ")
+// 	defer conn.Close()
 
-	// create a channel
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+// 	// create a channel
+// 	ch, err := conn.Channel()
+// 	failOnError(err, "Failed to open a channel")
+// 	defer ch.Close()
 
-	// declare queue for us to send messages to
-	q, err := ch.QueueDeclare(
-		"notifications", // name
-		false,           // durable
-		false,           // delete when unused
-		false,           // exclusive
-		false,           // no-wait
-		nil,             // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// 	// declare queue for us to send messages to
+// 	q, err := ch.QueueDeclare(
+// 		"notifications", // name
+// 		false,           // durable
+// 		false,           // delete when unused
+// 		false,           // exclusive
+// 		false,           // no-wait
+// 		nil,             // arguments
+// 	)
+// 	failOnError(err, "Failed to declare a queue")
+// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 	defer cancel()
 
-	body := "Hello World!"
-	err = ch.PublishWithContext(ctx,
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(body),
-		})
-	failOnError(err, "Failed to publish a message")
-	log.Printf(" [x] Sent %s\n", body)
-}
+// 	body := "Hello World!"
+// 	err = ch.PublishWithContext(ctx,
+// 		"",     // exchange
+// 		q.Name, // routing key
+// 		false,  // mandatory
+// 		false,  // immediate
+// 		amqp.Publishing{
+// 			ContentType: "text/plain",
+// 			Body:        []byte(body),
+// 		})
+// 	failOnError(err, "Failed to publish a message")
+// 	log.Printf(" [x] Sent %s\n", body)
+// }
 
 // method that when executed spawns a goroutine to listen for incoming
 // messages on a queue for new bids. With each new bid that appears
 // in the queue, this method calls upon the auctionservice to process
 // the new bid
-func handleNewBids(auctionservice *AuctionService) {
-	conn, err := amqp.Dial("amqp://guest:guest@rabbitmq-server:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
+func handleNewBids(auctionservice *AuctionService, conn *amqp.Connection, newBidExchangeName, newBidQueueName string) {
+
+	// msgs, err := ch.Consume(
+	// 	q.Name, // queue
+	// 	"",     // consumer
+	// 	true,   // auto-ack
+	// 	false,  // exclusive
+	// 	false,  // no-local
+	// 	false,  // no-wait
+	// 	nil,    // args
+	// )
+	// newBidExchangeName := "auction.new-bid"
+	// newBidQueueName := "auction.process-bid"
 
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
-	q, err := ch.QueueDeclare(
-		"notifications", // name
-		false,           // durable
+	err = ch.ExchangeDeclare(
+		newBidExchangeName, // name
+		"fanout",           // type
+		true,               // durable
+		false,              // auto-deleted
+		false,              // internal
+		false,              // no-wait
+		nil,                // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+newBidExchangeName)
+
+	_, err = ch.QueueDeclare(
+		newBidQueueName, // name
+		true,            // durable ORIGINALLY FALSE
 		false,           // delete when unused
 		false,           // exclusive
 		false,           // no-wait
 		nil,             // arguments
 	)
-	failOnError(err, "Failed to declare a queue")
+	failOnError(err, "Failed to declare queue: "+newBidQueueName)
 
+	// fmt.Printf("q.Name: %s\n", q.Name)
 	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
+		newBidQueueName, // queue ORIGINALLY q.Name
+		"",              // consumer
+		true,            // auto-ack
+		false,           // exclusive
+		false,           // no-local
+		false,           // no-wait
+		nil,             // args
 	)
 	failOnError(err, "Failed to register a consumer")
 
@@ -440,17 +726,56 @@ func handleNewBids(auctionservice *AuctionService) {
 
 	go func() {
 		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
+			log.Printf("[main] [.] received bid data to process: %s", d.Body)
 			// characterize
-			// TODO: auctionservice.ProcessNewBid()
+
+			var rawBidData domain.RawBidData
+			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&rawBidData)
+			err := json.Unmarshal(d.Body, &rawBidData)
+			failOnError(err, "[main] encountered problem unmarshalling raw bid data")
+			itemId := rawBidData.ItemId
+			bidderUserId := rawBidData.BidderUserId
+			timeReceived, _ := common.InterpretTimeStr(rawBidData.TimeReceived)
+			amountInCents := rawBidData.AmountInCents
+			// fmt.Print("got: ", itemId, bidderUserId, timeReceived, amountInCents)
+			if amountInCents < 0 {
+				msg := "bid money amount was negative integer."
+				// response.WasNewTopBid = false
+				// w.WriteHeader(http.StatusBadRequest)
+				// json.NewEncoder(w).Encode(response)
+				log.Println(msg)
+				return
+			}
+
+			auctionInteractionOutcome, auctionState, wasNewTopBid := auctionservice.ProcessNewBid(itemId, bidderUserId, *timeReceived, amountInCents)
+
+			var msg string
+			switch {
+			case auctionInteractionOutcome == auctionNotExist:
+				msg = "[main] auction does not exist."
+			case auctionState == domain.PENDING:
+				msg = "[main] auction has not yet started."
+			case auctionState == domain.OVER:
+				msg = "[main] auction is already over."
+			case auctionState == domain.FINALIZED:
+				msg = "[main] auction has already been finalized (archived)."
+			case auctionState == domain.ACTIVE && !wasNewTopBid:
+				msg = "[main] bid was not a new top bid because it was under start price or under the current top bid price."
+			case auctionState == domain.ACTIVE && wasNewTopBid:
+				msg = "[main] successfully processed bid; bid was new top bid!"
+			default:
+				panic("[main] error! see main.go handleNewBids(); reached end of method without understanding case")
+			}
+			log.Println(msg)
+
 		}
 	}()
 
-	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
+	log.Printf(" [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
 	<-forever
 }
 
-func handleHTTPAPIRequests(auctionservice *AuctionService) {
+func handleHTTPAPIRequests(auctionservice *AuctionService, conn *amqp.Connection, newBidExchangeName, newBidQueueName string) {
 	// creates a new instance of a mux router
 	myRouter := mux.NewRouter().StrictSlash(true)
 	// replace http.HandleFunc with myRouter.HandleFunc
@@ -462,11 +787,15 @@ func handleHTTPAPIRequests(auctionservice *AuctionService) {
 	// to pass in our newly created router as the second
 	// argument
 
+	ch, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+
 	// define all REST/HTTP API endpoints below
 	apiVersion := "v1"
 	myRouter.HandleFunc("/", homePage)
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Auctions/", apiVersion), createAuction(auctionservice)).Methods("POST")
-	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), processNewBid(auctionservice)).Methods("POST")
+	// myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createAndProcessNewBid(auctionservice, newBidExchangeName, newBidQueueName)).Methods("POST") ORIGINAL; did everything
+	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createNewBid(auctionservice, ch, newBidExchangeName, newBidQueueName)).Methods("POST")
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/cancelAuction/{itemId}", apiVersion), cancelAuction(auctionservice))
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/stopAuction/{itemId}", apiVersion), stopAuction(auctionservice))
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/ItemsUserHasBidsOn/{userId}", apiVersion), getItemsUserHasBidsOn(auctionservice)).Methods("GET")
@@ -506,26 +835,28 @@ func fillReposWDummyData(bidRepo domain.BidRepository, auctionRepo domain.Auctio
 	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)                    // 30 min later
 	item1 := domain.NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
 	item2 := domain.NewItem("102", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := domain.NewAuction(item1, nil, nil, false, false, nil)            // will go to completion
-	auction2 := domain.NewAuction(item2, nil, nil, false, false, nil)            // will get cancelled halfway through
+	auction1 := auctionRepo.NewAuction(item1, nil, nil, false, false, nil)       // will go to completion
+	auction2 := auctionRepo.NewAuction(item2, nil, nil, false, false, nil)       // will get cancelled halfway through
 
 	nowtime := time.Now()
 	latertime := nowtime.Add(time.Duration(4) * time.Hour)                        // 4 hrs from now
 	item3 := domain.NewItem("103", "asclark109", nowtime, latertime, int64(2000)) // $20 start price
-	auctionactive := domain.NewAuction(item3, nil, nil, false, false, nil)
+	auctionactive := auctionRepo.NewAuction(item3, nil, nil, false, false, nil)
 
 	latertime2 := nowtime.Add(time.Duration(2) * time.Hour)                        // 2 hrs from now
 	item4 := domain.NewItem("104", "asclark109", nowtime, latertime2, int64(2000)) // $20 start price
-	auctionactive2 := domain.NewAuction(item4, nil, nil, false, false, nil)
+	auctionactive2 := auctionRepo.NewAuction(item4, nil, nil, false, false, nil)
 
 	auctionRepo.SaveAuction(auction1)
 	auctionRepo.SaveAuction(auction2)
 	auctionRepo.SaveAuction(auctionactive)
 	auctionRepo.SaveAuction(auctionactive2)
+
 }
 
 func main() {
 
+	// interpret args
 	argsWithoutProg := os.Args[1:]
 	if len(argsWithoutProg) != 1 {
 		fmt.Println("incorrect number of args provided")
@@ -534,53 +865,114 @@ func main() {
 	}
 
 	flagStr := argsWithoutProg[0]
-	if !(flagStr == inMemoryFlag || flagStr == sqlFlag) {
+	if !(flagStr == inMemoryFlag || flagStr == sqlFlag) { // use inMemory repository or use SQL repository?
 		fmt.Println("unrecgonized arg provided: ", flagStr)
 		fmt.Println(getUsageStr())
 		return
 	}
 
-	// intialize repositories
+	// RABBITMQ PARAMS
+	// parameters below need to be manually changed with deployment
+	rabbitMQContainerHostName := "rabbitmq-server"
+	rabbitMQContainerPort := "5672"
+	startSoonExchangeName := "auction.start-soon"
+	startSoonQueueName := ""
+	endSoonExchangeName := "auction.end-soon"
+	endSoonQueueName := ""
+	auctionEndExchangeName := "auction.end"
+	auctionEndQueueName := ""
+	newBidExchangeName := "auction.new-bid"
+	newBidQueueName := "auction.process-bid"
+	var conn *amqp.Connection
+
+	// intialize OUTBOUND ADAPTER (AlertEngine)
+	// AlertEngine holds methods for sending msgs outbound from the context;
+	// Auctions hold a reference to a single AlertEngine, which they use to send msgs outbound (e.g. to RabbitMQ)
+	useStubbedAlertEngine := false // MANUALLY CHANGE; if true, sends msgs to console instead; if false, sends msgs to RabbitMQ/Contexts
+
+	var alertEngine domain.AlertEngine
+
+	// typical to have 1 RabbitMQ connection per application
+	connStr := fmt.Sprintf("amqp://guest:guest@%s:%s/", rabbitMQContainerHostName, rabbitMQContainerPort)
+	var err error
+	conn, err = amqp.Dial(connStr)
+	failOnError(err, "Failed to connect to RabbitMQ")
+	defer conn.Close() // close connection on application exit
+
+	if useStubbedAlertEngine { // send outbound msgs to console
+		fmt.Println("OUTBOUND ADAPTER = stubbed [outbound msgs go to console]...")
+		alertEngine = domain.NewConsoleAlertEngine() // sends outbound msgs to console
+		defer alertEngine.TurnDown()                 // nothing happens
+
+	} else { // send outbound msgs to RabbitMQ and other contexts
+		fmt.Println("OUTBOUND ADAPTER = deployment [outbound msgs go to RabbitMQ / other contexts]...")
+
+		alertEngine = domain.NewRabbitMQAlertEngine( // creates a channel internally with connection
+			conn,
+			rabbitMQContainerHostName,
+			startSoonExchangeName,
+			startSoonQueueName,
+			endSoonExchangeName,
+			endSoonQueueName,
+			auctionEndExchangeName,
+			auctionEndQueueName,
+		)
+		defer alertEngine.TurnDown() // close channel(s) on application exit
+	}
+
+	// intialize REPOSITORIES
 	var bidRepo domain.BidRepository
 	var auctionRepo domain.AuctionRepository
-	if flagStr == inMemoryFlag {
-		fmt.Println("using in-memory repositories...")
-		bidRepo = domain.NewInMemoryBidRepository(false) // do not use seed; assign random uuid's
-		auctionRepo = domain.NewInMemoryAuctionRepository()
-	} else if flagStr == sqlFlag {
-		fmt.Println("using Postgres SQL based repositories...")
-		bidRepo = domain.NewPostgresSQLBidRepository(false)           // do not use seed; assign random uuid's
-		auctionRepo = domain.NewPostgresSQLAuctionRepository(bidRepo) // uses bidRepo to add references to Auction objs
+	if flagStr == inMemoryFlag { // use in-memory repositories
+		fmt.Println("REPOSITORY TYPE = in-memory [no persistence; everything held in-memory]")
+		bidRepo = domain.NewInMemoryBidRepository(false) // do not use seed; assign random uuid's to new Bids
+		auctionRepo = domain.NewInMemoryAuctionRepository(alertEngine)
+		// fillReposWDummyData(bidRepo, auctionRepo) // seed with data?
+	} else if flagStr == sqlFlag { // use SQL-based repositories
+		fmt.Println("REPOSITORY TYPE = postgres SQL [data persisted to docker-volume on localhost]")
+		bidRepo = domain.NewPostgresSQLBidRepository(false)                        // do not use seed; assign random uuid's to new Bids
+		auctionRepo = domain.NewPostgresSQLAuctionRepository(bidRepo, alertEngine) // uses bidRepo to add references to Auction objs
 	} else {
 		fmt.Println("unrecgonized arg provided: ", flagStr)
 		fmt.Println(getUsageStr())
 		return
 	}
 
-	fmt.Println("Auctions Service API v1.0 - [Mux Routers impl for HTTP/RESTful API; RabbitMQ for messaging]")
+	// seed with data?
+	// if flagStr == inMemoryFlag {
+	// 	fmt.Println("bid repository: ", bidRepo)
+	// 	fillReposWDummyData(bidRepo, auctionRepo)
+	// }
 
-	// initialize service
+	log.Printf("Auctions Service API v1.0 - [Mux Routers impl for HTTP/RESTful API; RabbitMQ for messaging]")
+
+	// initialize AUCTION-SERVICE
 	auctionservice := NewAuctionService(bidRepo, auctionRepo)
 
-	// spawn goroutines that will invoke auctionservice periodically to do internal house-keeping;
-	// this is encapsulated in AuctionSessionManager; note: AuctionSessionManager.TurnOn() spawns
-	// 3 goroutines that each are responsible for periodically proding the auctionservice to send
-	// out alerts, finalize (archive) auctions that are over, and load into memory auctions that start
-	// soon. these goroutines return (stop) when an internal state variable of AuctionSessionManager becomes
-	// false. This works but is not safe as is. AuctionSessionManager.TurnOn() spawns go routines, which
-	// terminate when the state var goes false. AuctionSessionManager.TurnOff() sets the state var to false.
-	// thus, a quick sequence of calling TurnOn(), TurnOff(), TurnOn() may result in 3 new goroutines getting
-	// spawned without the original 3 terminating. should be refactored to use a bool channels
-	// that are passed into the spawned goroutines instead to avoid this issue.
-	alertCycle := time.Duration(10) * time.Second
-	finalizeCycle := time.Duration(6) * time.Second
-	loadAuctionCycle := time.Duration(10) * time.Second
+	// initialize AUCTION-SESSION-MANAGER (description below):
+	// spawns goroutines that will invoke auctionservice periodically to do internal house-keeping;
+	// AuctionSessionManager.TurnOn() spawns 3 goroutines that each are responsible for periodically invoking
+	// the auctionservice to send out alerts, finalize (archive) auctions that are over, and load into memory
+	// auctions that start soon. these goroutines return (stop) when an internal bool variable of AuctionSessionManager
+	// becomes false (TurnOn() sets the variable to true and spawns the goroutines; the goroutines only exit
+	// when the boolean variable goes to false; TurnOff() sets this variable to false). This implementation works
+	// as-written but is not strictly correct. It works because the application calls TurnOn() only when application
+	// starts and never calls TurnOff(). However, as-written it is not correct to intermittently call TurnOn(), TurnOff(),
+	// TurnOn(), etc. A race condition may occur with a sequence of 3 calls: TurnOn(), TurnOff(), TurnOn(). It is
+	// possible by race condition that this will not cause the first 3 goroutines to exit and will spawn an additional
+	// 3 goroutines, leading to a total of 6. This can be refactored to be correct by passing the spawned goroutines a
+	// bool channel, which they will use to determine when they should exit.
+	alertCycle := time.Duration(10) * time.Second       // how often the service should introspect to see if alerts should be sent out
+	finalizeCycle := time.Duration(6) * time.Second     // how often the service should introspect to see if auctions should be finalized
+	loadAuctionCycle := time.Duration(10) * time.Second // how often the service should introspect to see if it should load new auctions into memory
 	auctionSessionManager := NewAuctionSessionManager(auctionservice, alertCycle, finalizeCycle, loadAuctionCycle)
-	auctionSessionManager.TurnOn()
+	auctionSessionManager.TurnOn() // starts the periodic invocation of auctionservice
 
-	// spawn goroutines that will invoke auctionservice upon incoming HTTP/RESTful requests and messages
-	go handleHTTPAPIRequests(auctionservice)
-	go handleNewBids(auctionservice)
+	// spawn goroutines that will invoke auctionservice upon incoming HTTP/RESTful requests
+	go handleHTTPAPIRequests(auctionservice, conn, newBidExchangeName, newBidQueueName)
+
+	// spawn goroutines that will invoke auctionservice upon incoming RabbitMQ messages
+	go handleNewBids(auctionservice, conn, newBidExchangeName, newBidQueueName)
 
 	time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
 	time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
@@ -599,13 +991,13 @@ func main() {
 	startime := time.Now()
 	endtime := startime.Add(time.Duration(10) * time.Minute)
 	item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := domain.NewAuction(item1, &bids, nil, false, false, nil)         // will go to completion
+	auction1 := auctionRepo.NewAuction(item1, &bids, nil, false, false, nil)    // will go to completion
 	auctionRepo.SaveAuction(auction1)
 
-	time.Sleep(time.Duration(5) * time.Second)
+	// time.Sleep(time.Duration(5) * time.Second)
 
-	fmt.Println("canceling new auction")
-	auctionservice.StopAuction(item1.ItemId)
+	// fmt.Println("canceling new auction")
+	// auctionservice.StopAuction(item1.ItemId)
 
 	// lastTime := time.Now()
 	// for {

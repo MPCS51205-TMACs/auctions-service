@@ -31,16 +31,28 @@ type RequestCreateAuction struct {
 	StartPriceInCents int64  `json:"startpriceincents"`
 }
 
-type RequestProcessNewBid struct {
+type RequestCreateNewBid struct {
 	ItemId        string `json:"itemid"`
-	BidderUserId  string `json:"selleruserid"`
+	BidderUserId  string `json:"bidderuserid"`
 	AmountInCents int64  `json:"amountincents"`
 }
 
-type ResponseProcessNewBid struct {
-	Msg          string `json:"message"`
-	WasNewTopBid bool   `json:"was_new_top_bid"`
+type ResponseCreateNewBid struct {
+	Msg string `json:"message"`
+	// WasNewTopBid bool   `json:"was_new_top_bid"`
 }
+
+type RequestProcessNewBid struct {
+	ItemId        string `json:"itemid"`
+	BidderUserId  string `json:"bidderuserid"`
+	AmountInCents int64  `json:"amountincents"`
+	TimeReceived  string `json:"timereceived"`
+}
+
+// type ResponseProcessNewBid struct {
+// 	Msg          string `json:"message"`
+// 	WasNewTopBid bool   `json:"was_new_top_bid"`
+// }
 
 type ResponseCreateAuction struct {
 	Msg string `json:"message"`
