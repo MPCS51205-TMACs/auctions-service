@@ -30,7 +30,7 @@ func NewPostgresSQLAuctionRepository(bidRepo BidRepository, alertEngine AlertEng
 
 	postgresUsername := "postgres"
 	postgresPassword := "mysecret"
-	postgresContainerhost := "postgres-server"
+	postgresContainerhost := "auctions-postgres-server"
 	postgresContainerport := "5432"
 	postgresDbName := "auctiondb"
 	connStr := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable", postgresUsername, postgresPassword, postgresContainerhost, postgresContainerport, postgresDbName)

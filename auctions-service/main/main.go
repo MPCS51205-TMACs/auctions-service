@@ -1352,31 +1352,31 @@ func main() {
 	go handleUserDelete(auctionservice, conn, UserUpdateExchangeName, UserUpdateQueueName)
 	go handleUserUpdate(auctionservice, conn, UserDeleteExchangeName, UserDeleteQueueName)
 
-	// time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
-	// time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
-	// time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
-	// time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
-	// bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
-	// bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
-	// bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
-	// bid4 := *domain.NewBid("104", "20", "katharine2", time4, int64(10), true)
-	// bidRepo.SaveBid(&bid1)
-	// bidRepo.SaveBid(&bid2)
-	// bidRepo.SaveBid(&bid3)
-	// bidRepo.SaveBid(&bid4)
-	// bids := []*domain.Bid{&bid1, &bid2, &bid3, &bid4}
+	time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
+	time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
+	time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
+	time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
+	bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
+	bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
+	bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
+	bid4 := *domain.NewBid("104", "20", "katharine2", time4, int64(10), true)
+	bidRepo.SaveBid(&bid1)
+	bidRepo.SaveBid(&bid2)
+	bidRepo.SaveBid(&bid3)
+	bidRepo.SaveBid(&bid4)
+	bids := []*domain.Bid{&bid1, &bid2, &bid3, &bid4}
 	// bids := []*domain.Bid{}
 
-	// startime := time.Now()
-	// endtime := startime.Add(time.Duration(10) * time.Minute)
-	// item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	// auction1 := auctionRepo.NewAuction(item1, &bids, nil, false, false, nil)    // will go to completion
-	// auctionRepo.SaveAuction(auction1)
+	startime := time.Now()
+	endtime := startime.Add(time.Duration(10) * time.Minute)
+	item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
+	auction1 := auctionRepo.NewAuction(item1, &bids, nil, false, false, nil)    // will go to completion
+	auctionRepo.SaveAuction(auction1)
 
-	// time.Sleep(time.Duration(5) * time.Second)
+	time.Sleep(time.Duration(5) * time.Second)
 
-	// fmt.Println("canceling new auction")
-	// auctionservice.StopAuction(item1.ItemId)
+	fmt.Println("canceling new auction")
+	auctionservice.StopAuction(item1.ItemId)
 
 	// lastTime := time.Now()
 	// for {
