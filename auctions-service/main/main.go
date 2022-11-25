@@ -771,7 +771,363 @@ func handleNewBids(auctionservice *AuctionService, conn *amqp.Connection, newBid
 		}
 	}()
 
-	log.Printf(" [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	log.Printf("[handleNewBids] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	<-forever
+}
+
+func handleItemCounterfeit(auctionservice *AuctionService, conn *amqp.Connection, ItemCounterfeitExchangeName, ItemCounterfeitQueueName string) {
+
+	ch, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+		ItemCounterfeitExchangeName, // name
+		"fanout",                    // type
+		true,                        // durable
+		false,                       // auto-deleted
+		false,                       // internal
+		false,                       // no-wait
+		nil,                         // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+ItemCounterfeitExchangeName)
+
+	_, err = ch.QueueDeclare(
+		ItemCounterfeitQueueName, // name
+		true,                     // durable ORIGINALLY FALSE
+		false,                    // delete when unused
+		false,                    // exclusive
+		false,                    // no-wait
+		nil,                      // arguments
+	)
+	failOnError(err, "Failed to declare queue: "+ItemCounterfeitQueueName)
+
+	err = ch.QueueBind(
+		ItemCounterfeitQueueName,    // queue name; ORIGINALLY q.Name
+		"",                          // routing key
+		ItemCounterfeitExchangeName, // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind queue for ItemCounterfeit")
+
+	// fmt.Printf("q.Name: %s\n", q.Name)
+	msgs, err := ch.Consume(
+		ItemCounterfeitQueueName, // queue ORIGINALLY q.Name
+		"",                       // consumer
+		true,                     // auto-ack
+		false,                    // exclusive
+		false,                    // no-local
+		false,                    // no-wait
+		nil,                      // args
+	)
+	failOnError(err, "Failed to register consumer for ItemCounterfeit")
+
+	var forever chan struct{}
+
+	go func() {
+		for d := range msgs {
+			log.Printf("[main] [.] received Item.counterfeit event: %s", d.Body)
+			// characterize
+
+			var requestBody ItemCounterfeitEvent
+			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&rawBidData)
+			err := json.Unmarshal(d.Body, &requestBody)
+			if err != nil {
+				fmt.Println("[main] encountered problem unmarshalling Item.counterfeit event")
+				// failOnError(err, "[main] encountered problem unmarshalling Item.counterfeit event")
+			} else {
+
+			}
+
+			itemId := requestBody.ItemId
+			fmt.Printf("[main] STUBBED reacting to Item.counterfeit event (itemId=%s)...\n", itemId)
+			// auctionInteractionOutcome := auctionservice.StopAuction(itemId)
+
+			// var msg string
+			// switch {
+			// case auctionInteractionOutcome == auctionNotExist:
+			// 	msg = "[main] auction does not exist."
+			// case auctionInteractionOutcome == auctionAlreadyFinalized:
+			// 	msg = "[main] fail. auction is already finalized."
+			// case auctionInteractionOutcome == auctionAlreadyCanceled: // should never happen
+			// 	msg = "[main] fail. auction is already canceled."
+			// case auctionInteractionOutcome == auctionAlreadyOver: // should never happen
+			// 	msg = "[main] fail. auction is already over."
+			// default:
+			// 	panic("[main] error! see main.go handleItemCounterfeit(); reached end of method without understanding case")
+			// }
+			// log.Println(msg)
+		}
+	}()
+
+	log.Printf("[handleItemCounterfeit] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	<-forever
+}
+
+func handleItemInappropriate(auctionservice *AuctionService, conn *amqp.Connection, ItemInapropriateExchangeName, ItemInapropriateQueueName string) {
+
+	ch, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+		ItemInapropriateExchangeName, // name
+		"fanout",                     // type
+		true,                         // durable
+		false,                        // auto-deleted
+		false,                        // internal
+		false,                        // no-wait
+		nil,                          // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+ItemInapropriateExchangeName)
+
+	_, err = ch.QueueDeclare(
+		ItemInapropriateQueueName, // name
+		true,                      // durable ORIGINALLY FALSE
+		false,                     // delete when unused
+		false,                     // exclusive
+		false,                     // no-wait
+		nil,                       // arguments
+	)
+	failOnError(err, "Failed to declare queue: "+ItemInapropriateQueueName)
+
+	err = ch.QueueBind(
+		ItemInapropriateQueueName,    // queue name; ORIGINALLY q.Name
+		"",                           // routing key
+		ItemInapropriateExchangeName, // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind queue for ItemCounterfeit")
+
+	// fmt.Printf("q.Name: %s\n", q.Name)
+	msgs, err := ch.Consume(
+		ItemInapropriateQueueName, // queue ORIGINALLY q.Name
+		"",                        // consumer
+		true,                      // auto-ack
+		false,                     // exclusive
+		false,                     // no-local
+		false,                     // no-wait
+		nil,                       // args
+	)
+	failOnError(err, "Failed to register consumer for ItemInapropriate")
+
+	var forever chan struct{}
+
+	go func() {
+		for d := range msgs {
+			log.Printf("[main] [.] received Item.Inapropriate event: %s", d.Body)
+			// characterize
+
+			var requestBody ItemInapropriateEvent
+			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&rawBidData)
+			err := json.Unmarshal(d.Body, &requestBody)
+			if err != nil {
+				fmt.Println("[main] encountered problem unmarshalling Item.inapropriate event")
+				// failOnError(err, "[main] encountered problem unmarshalling Item.inapropriate event")
+			} else {
+
+			}
+
+			itemId := requestBody.ItemId
+			fmt.Printf("[main] STUBBED reacting to Item.inapropriate event (itemId=%s)...\n", itemId)
+			// auctionInteractionOutcome := auctionservice.StopAuction(itemId)
+
+			// var msg string
+			// switch {
+			// case auctionInteractionOutcome == auctionNotExist:
+			// 	msg = "[main] auction does not exist."
+			// case auctionInteractionOutcome == auctionAlreadyFinalized:
+			// 	msg = "[main] fail. auction is already finalized."
+			// case auctionInteractionOutcome == auctionAlreadyCanceled: // should never happen
+			// 	msg = "[main] fail. auction is already canceled."
+			// case auctionInteractionOutcome == auctionAlreadyOver: // should never happen
+			// 	msg = "[main] fail. auction is already over."
+			// default:
+			// 	panic("[main] error! see main.go handleItemInapropriate(); reached end of method without understanding case")
+			// }
+			// log.Println(msg)
+		}
+	}()
+
+	log.Printf("[handleItemInappropriate] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	<-forever
+}
+
+func handleUserUpdate(auctionservice *AuctionService, conn *amqp.Connection, UserUpdateExchangeName, UserUpdateQueueName string) {
+	ch, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+		UserUpdateExchangeName, // name
+		"fanout",               // type
+		true,                   // durable
+		false,                  // auto-deleted
+		false,                  // internal
+		false,                  // no-wait
+		nil,                    // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+UserUpdateExchangeName)
+
+	_, err = ch.QueueDeclare(
+		UserUpdateQueueName, // name
+		true,                // durable ORIGINALLY FALSE
+		false,               // delete when unused
+		false,               // exclusive
+		false,               // no-wait
+		nil,                 // arguments
+	)
+	failOnError(err, "Failed to declare queue: "+UserUpdateQueueName)
+
+	err = ch.QueueBind(
+		UserUpdateQueueName,    // queue name; ORIGINALLY q.Name
+		"",                     // routing key
+		UserUpdateExchangeName, // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind queue for ItemCounterfeit")
+
+	// fmt.Printf("q.Name: %s\n", q.Name)
+	msgs, err := ch.Consume(
+		UserUpdateQueueName, // queue ORIGINALLY q.Name
+		"",                  // consumer
+		true,                // auto-ack
+		false,               // exclusive
+		false,               // no-local
+		false,               // no-wait
+		nil,                 // args
+	)
+	failOnError(err, "Failed to register consumer for UserUpdate")
+
+	var forever chan struct{}
+
+	go func() {
+		for d := range msgs {
+			log.Printf("[main] [.] received User.UserUpdate event: %s", d.Body)
+			// characterize
+
+			// var requestBody UserUpdateEvent
+			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&rawBidData)
+			// err := json.Unmarshal(d.Body, &requestBody)
+			// if err != nil {
+			// 	fmt.Println("[main] encountered problem unmarshalling Item.UserUpdate event")
+			// 	// failOnError(err, "[main] encountered problem unmarshalling Item.inapropriate event")
+			// }
+
+			// itemId := requestBody.ItemId
+			fmt.Printf("[main] STUBBED reacting to Item.UserUpdate event (userId=)...\n")
+			// auctionInteractionOutcome := auctionservice.StopAuction(itemId)
+
+			// var msg string
+			// switch {
+			// case auctionInteractionOutcome == auctionNotExist:
+			// 	msg = "[main] auction does not exist."
+			// case auctionInteractionOutcome == auctionAlreadyFinalized:
+			// 	msg = "[main] fail. auction is already finalized."
+			// case auctionInteractionOutcome == auctionAlreadyCanceled: // should never happen
+			// 	msg = "[main] fail. auction is already canceled."
+			// case auctionInteractionOutcome == auctionAlreadyOver: // should never happen
+			// 	msg = "[main] fail. auction is already over."
+			// default:
+			// 	panic("[main] error! see main.go handleItemInapropriate(); reached end of method without understanding case")
+			// }
+			// log.Println(msg)
+		}
+	}()
+
+	log.Printf("[handleUserUpdate] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	<-forever
+}
+
+func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, UserDeleteExchangeName, UserDeleteQueueName string) {
+
+	ch, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+		UserDeleteExchangeName, // name
+		"fanout",               // type
+		true,                   // durable
+		false,                  // auto-deleted
+		false,                  // internal
+		false,                  // no-wait
+		nil,                    // arguments
+	)
+	failOnError(err, "Failed to declare exchange: "+UserDeleteExchangeName)
+
+	_, err = ch.QueueDeclare(
+		UserDeleteQueueName, // name
+		true,                // durable ORIGINALLY FALSE
+		false,               // delete when unused
+		false,               // exclusive
+		false,               // no-wait
+		nil,                 // arguments
+	)
+	failOnError(err, "Failed to declare queue: "+UserDeleteQueueName)
+
+	err = ch.QueueBind(
+		UserDeleteQueueName,    // queue name; ORIGINALLY q.Name
+		"",                     // routing key
+		UserDeleteExchangeName, // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind queue for ItemCounterfeit")
+
+	// fmt.Printf("q.Name: %s\n", q.Name)
+	msgs, err := ch.Consume(
+		UserDeleteQueueName, // queue ORIGINALLY q.Name
+		"",                  // consumer
+		true,                // auto-ack
+		false,               // exclusive
+		false,               // no-local
+		false,               // no-wait
+		nil,                 // args
+	)
+	failOnError(err, "Failed to register consumer for UserDelete")
+
+	var forever chan struct{}
+
+	go func() {
+		for d := range msgs {
+			log.Printf("[main] [.] received User.UserDelete event: %s", d.Body)
+			// characterize
+
+			var requestBody UserDeleteEvent
+			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&requestBody)
+			err := json.Unmarshal(d.Body, &requestBody)
+			if err != nil {
+				fmt.Println("[main] encountered problem unmarshalling Item.UserUpdate event")
+				// failOnError(err, "[main] encountered problem unmarshalling Item.inapropriate event")
+			}
+
+			userId := requestBody.UserId
+			fmt.Printf("[main] reacting to Item.UserDelete event (userId=)...\n")
+			numAuctionsWBidUpdates := auctionservice.DeactivateUserBids(userId)
+			fmt.Printf("[main] deactivated %d bids \n", numAuctionsWBidUpdates)
+
+			// var msg string
+			// switch {
+			// case auctionInteractionOutcome == auctionNotExist:
+			// 	msg = "[main] auction does not exist."
+			// case auctionInteractionOutcome == auctionAlreadyFinalized:
+			// 	msg = "[main] fail. auction is already finalized."
+			// case auctionInteractionOutcome == auctionAlreadyCanceled: // should never happen
+			// 	msg = "[main] fail. auction is already canceled."
+			// case auctionInteractionOutcome == auctionAlreadyOver: // should never happen
+			// 	msg = "[main] fail. auction is already over."
+			// default:
+			// 	panic("[main] error! see main.go handleItemInapropriate(); reached end of method without understanding case")
+			// }
+			// log.Println(msg)
+		}
+	}()
+
+	log.Printf("[handleUserDelete] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
 	<-forever
 }
 
@@ -875,14 +1231,31 @@ func main() {
 	// parameters below need to be manually changed with deployment
 	rabbitMQContainerHostName := "rabbitmq-server"
 	rabbitMQContainerPort := "5672"
+
 	startSoonExchangeName := "auction.start-soon"
 	startSoonQueueName := ""
+
 	endSoonExchangeName := "auction.end-soon"
 	endSoonQueueName := ""
+
 	auctionEndExchangeName := "auction.end"
 	auctionEndQueueName := ""
+
 	newBidExchangeName := "auction.new-bid"
 	newBidQueueName := "auction.process-bid"
+
+	ItemCounterfeitExchangeName := "item.counterfeit"
+	ItemCounterfeitQueueName := "auction.consume_counterfeit"
+
+	ItemInappropriateExchangeName := "item.innapropriate"
+	ItemInappropriateQueueName := "auction.consume_innapropriate"
+
+	UserUpdateExchangeName := "user.update"
+	UserUpdateQueueName := "auction.consume_userupdate"
+
+	UserDeleteExchangeName := "user.delete"
+	UserDeleteQueueName := "auction.consume_userdelete"
+
 	var conn *amqp.Connection
 
 	// intialize OUTBOUND ADAPTER (AlertEngine)
@@ -972,27 +1345,33 @@ func main() {
 	go handleHTTPAPIRequests(auctionservice, conn, newBidExchangeName, newBidQueueName)
 
 	// spawn goroutines that will invoke auctionservice upon incoming RabbitMQ messages
+
 	go handleNewBids(auctionservice, conn, newBidExchangeName, newBidQueueName)
+	go handleItemCounterfeit(auctionservice, conn, ItemCounterfeitExchangeName, ItemCounterfeitQueueName)
+	go handleItemInappropriate(auctionservice, conn, ItemInappropriateExchangeName, ItemInappropriateQueueName)
+	go handleUserDelete(auctionservice, conn, UserUpdateExchangeName, UserUpdateQueueName)
+	go handleUserUpdate(auctionservice, conn, UserDeleteExchangeName, UserDeleteQueueName)
 
-	time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
-	time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
-	time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
-	time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
-	bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
-	bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
-	bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
-	bid4 := *domain.NewBid("104", "20", "katharine2", time4, int64(10), true)
-	bidRepo.SaveBid(&bid1)
-	bidRepo.SaveBid(&bid2)
-	bidRepo.SaveBid(&bid3)
-	bidRepo.SaveBid(&bid4)
-	bids := []*domain.Bid{&bid1, &bid2, &bid3, &bid4}
+	// time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
+	// time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
+	// time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
+	// time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
+	// bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
+	// bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
+	// bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
+	// bid4 := *domain.NewBid("104", "20", "katharine2", time4, int64(10), true)
+	// bidRepo.SaveBid(&bid1)
+	// bidRepo.SaveBid(&bid2)
+	// bidRepo.SaveBid(&bid3)
+	// bidRepo.SaveBid(&bid4)
+	// bids := []*domain.Bid{&bid1, &bid2, &bid3, &bid4}
+	// bids := []*domain.Bid{}
 
-	startime := time.Now()
-	endtime := startime.Add(time.Duration(10) * time.Minute)
-	item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
-	auction1 := auctionRepo.NewAuction(item1, &bids, nil, false, false, nil)    // will go to completion
-	auctionRepo.SaveAuction(auction1)
+	// startime := time.Now()
+	// endtime := startime.Add(time.Duration(10) * time.Minute)
+	// item1 := domain.NewItem("20", "asclark109", startime, endtime, int64(2000)) // $20 start price
+	// auction1 := auctionRepo.NewAuction(item1, &bids, nil, false, false, nil)    // will go to completion
+	// auctionRepo.SaveAuction(auction1)
 
 	// time.Sleep(time.Duration(5) * time.Second)
 

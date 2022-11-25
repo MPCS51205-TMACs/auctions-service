@@ -68,6 +68,7 @@ type JsonAuction struct {
 	StartTime         string `json:"starttime"`
 	EndTime           string `json:"endtime"`
 	StartPriceInCents int64  `json:"startpriceincents"`
+	TopBid            *domain.Bid
 }
 
 func ExportAuction(auction *domain.Auction) *JsonAuction {
@@ -78,5 +79,24 @@ func ExportAuction(auction *domain.Auction) *JsonAuction {
 		StartPriceInCents: auction.Item.StartPriceInCents,
 		StartTime:         auction.Item.StartTime.Format(layout),
 		EndTime:           auction.Item.EndTime.Format(layout),
+		TopBid:            auction.GetHighestActiveBid(),
 	}
+}
+
+// rabbit events published by other contexts
+type ItemCounterfeitEvent struct {
+	ItemId string `json:"itemid"`
+}
+
+type ItemInapropriateEvent struct {
+	ItemId string `json:"itemid"`
+}
+
+type UserUpdateEvent struct {
+	UserId     string `json:"userid"`
+	UserUpdate string `json:"userupdate"` // this might require its own class to parse
+}
+
+type UserDeleteEvent struct {
+	UserId string `json:"userid"`
 }

@@ -390,7 +390,7 @@ func (auctionservice *AuctionService) ActivateUserBids(userId string) (int, int)
 
 }
 
-func (auctionservice *AuctionService) DeactivateUserBids(userId string) (int, int) {
+func (auctionservice *AuctionService) DeactivateUserBids(userId string) int {
 
 	// log.Printf("[AuctionService] LOCK")
 	auctionservice.mutex.Lock()
@@ -429,7 +429,7 @@ func (auctionservice *AuctionService) DeactivateUserBids(userId string) (int, in
 	// log.Printf("[AuctionService] UNLOCK")
 	auctionservice.mutex.Unlock()
 
-	return len(bidsToUpdateInRepo), numAuctionsWBidUpdates
+	return numAuctionsWBidUpdates
 }
 
 func (auctionservice *AuctionService) LoadAuctionsIntoMemory(sinceTime time.Time, upToTime time.Time) {
