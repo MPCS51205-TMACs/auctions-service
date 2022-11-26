@@ -75,7 +75,7 @@ func (auctionservice *AuctionService) CreateAuction(itemId, sellerUserId string,
 	}
 
 	// if auction to be created will start in sooner than 5 minutes, do not proceed
-	if creationTime.Add(time.Duration(1) * time.Minute).After(*startTime) {
+	if creationTime.Add(time.Duration(15) * time.Second).After(*startTime) {
 		log.Printf("[AuctionService] fail. Auction would start in <= 1 minute from now. push back start time to later time.")
 		// log.Printf("[AuctionService] UNLOCK")
 		auctionservice.mutex.Unlock()
@@ -151,6 +151,14 @@ func (auctionservice *AuctionService) CancelAuction(itemId string, requesterUser
 	// confirm auction isn't already over (at time)
 	if relevantAuction.IsOverOrCanceledAtTime(timeWhenCancelReceived) {
 		log.Printf("[AuctionService] fail. Auction already over")
+		// log.Printf("[AuctionService] UNLOCK")
+		auctionservice.mutex.Unlock()
+		return auctionAlreadyOver
+	}
+
+	// confirm auction isn't active and has a bid (at time)
+	if relevantAuction.HasActiveBid() && relevantAuction.IsActive(timeWhenCancelReceived) {
+		log.Printf("[AuctionService] fail. Auction is ongoing and there is at least one bid")
 		// log.Printf("[AuctionService] UNLOCK")
 		auctionservice.mutex.Unlock()
 		return auctionAlreadyOver
@@ -333,6 +341,22 @@ func (auctionservice *AuctionService) GetItemsUserHasBidsOn(userId string) *[]st
 	return &itemIds
 }
 
+func (auctionservice *AuctionService) GetAuction(itemId string) *domain.Auction {
+	log.Println("[AuctionService] getting and returning auction for itemid=%s...", itemId)
+	auction := auctionservice.auctionRepo.GetAuction(itemId)
+	return auction
+}
+
+func (auctionservice *AuctionService) GetAuctions() *[]*domain.Auction {
+	log.Println("[AuctionService] getting and returning all auctions (excluding bid data)...")
+	nowTime := time.Now()
+	old := nowTime.Add(-time.Duration(24*3000) * time.Hour)         // 3000 days in past (basically all previous auctions)
+	future := nowTime.Add(time.Duration(24*3000) * time.Hour)       // 3000 days in future (basically all future auctions)
+	auctions := auctionservice.auctionRepo.GetAuctions(old, future) // all auctions whose start->end time overlaps with this window
+	// filter down to only active auctions (some auctions may be canceled / finalized even though their start->end time overlaps w now)
+	return &auctions
+}
+
 func (auctionservice *AuctionService) GetActiveAuctions() *[]*domain.Auction {
 	log.Println("[AuctionService] getting and returning active auctions...")
 	nowTime := time.Now()
@@ -347,7 +371,7 @@ func (auctionservice *AuctionService) GetActiveAuctions() *[]*domain.Auction {
 	return &auctions
 }
 
-func (auctionservice *AuctionService) ActivateUserBids(userId string) (int, int) {
+func (auctionservice *AuctionService) ActivateUserBids(userId string) int {
 
 	// log.Printf("[AuctionService] LOCK")
 	auctionservice.mutex.Lock()
@@ -386,7 +410,7 @@ func (auctionservice *AuctionService) ActivateUserBids(userId string) (int, int)
 	// log.Printf("[AuctionService] UNLOCK")
 	auctionservice.mutex.Unlock()
 
-	return len(bidsToUpdateInRepo), numAuctionsWBidUpdates
+	return numAuctionsWBidUpdates
 
 }
 

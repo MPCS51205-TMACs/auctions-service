@@ -231,7 +231,7 @@ func (auction *Auction) Cancel(timeWhenCancellationIssued time.Time) bool {
 		log.Printf("[Auction %s] canceling self (active auction state but no active bids).\n", auction.Item.ItemId)
 		return true
 	default:
-		log.Printf("[Auction %s] can't cancel self (auction is over or finalized).\n", auction.Item.ItemId)
+		log.Printf("[Auction %s] can't cancel self (auction is over, finalized, or active and with bids).\n", auction.Item.ItemId)
 		return false // state is OVER, or CANCELED already
 	}
 }

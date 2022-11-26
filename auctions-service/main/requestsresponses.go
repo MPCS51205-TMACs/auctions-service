@@ -58,8 +58,8 @@ type ResponseCreateAuction struct {
 	Msg string `json:"message"`
 }
 
-type ResponseGetActiveAuctions struct {
-	ActiveAuctions []JsonAuction `json:"activeauctions"`
+type ResponseGetAuctions struct {
+	ActiveAuctions []JsonAuction `json:"auctions"`
 }
 
 type JsonAuction struct {

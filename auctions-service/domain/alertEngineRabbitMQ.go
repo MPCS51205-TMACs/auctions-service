@@ -24,6 +24,8 @@ type RabbitMQAlertEngine struct {
 	endSoonQueueName          string
 	auctionEndExchangeName    string
 	auctionEndQueueName       string
+	newTopBidExchangeName     string
+	newTopBidQueueName        string
 }
 
 func NewRabbitMQAlertEngine(
@@ -34,7 +36,9 @@ func NewRabbitMQAlertEngine(
 	endSoonExchangeName,
 	endSoonQueueName,
 	auctionEndExchangeName,
-	auctionEndQueueName string) *RabbitMQAlertEngine {
+	auctionEndQueueName,
+	newTopBidExchangeName,
+	newTopBidQueueName string) *RabbitMQAlertEngine {
 
 	// rabbitMqContainerHostName := "rabbitmq-server" // e.g. "localhost"
 	// exchangeName := "auctionfinalizations"
@@ -97,7 +101,9 @@ func NewRabbitMQAlertEngine(
 		startSoonExchangeName,
 		startSoonQueueName,
 		auctionEndExchangeName,
-		auctionEndQueueName}
+		auctionEndQueueName,
+		newTopBidExchangeName,
+		newTopBidQueueName}
 }
 
 // func (auction *RabbitMQAlertEngine) ConnectToRabbit
@@ -110,7 +116,7 @@ func (alertEngine *RabbitMQAlertEngine) SendAuctionStartSoonAlert(msg string, it
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 
-	log.Printf("[AlertEngine] Sending AuctionStartingSoon Alert to RabbitMQ (item_id=%s)...\n", itemId)
+	log.Printf("[AlertEngine] Sending AuctionStartingSoon Alert (item_id=%s) to RabbitMQ exchange '%s'\n", itemId, alertEngine.startSoonExchangeName)
 	// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
 	err = alertEngine.ch.PublishWithContext(ctx,
 		alertEngine.startSoonExchangeName, // exchange
@@ -138,7 +144,7 @@ func (alertEngine *RabbitMQAlertEngine) SendAuctionEndSoonAlert(msg string, item
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 
-	log.Printf("[AlertEngine] Sending AuctionEndingSoon Alert to RabbitMQ (item_id=%s)\n", itemId)
+	log.Printf("[AlertEngine] Sending AuctionEndingSoon Alert (item_id=%s) to RabbitMQ exchange '%s'\n", itemId, alertEngine.endSoonExchangeName)
 	// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
 	err = alertEngine.ch.PublishWithContext(ctx,
 		alertEngine.startSoonExchangeName, // exchange
@@ -184,13 +190,13 @@ func (alertEngine *RabbitMQAlertEngine) SendNewTopBidAlert(itemId, sellerUserId,
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 
-	log.Printf("[AlertEngine] Sending Auction data to RabbitMQ (item_id=%s)\n", *itemId)
+	log.Printf("[AlertEngine] Sending Auction data to RabbitMQ (item_id=%s) to RabbitMQ exchange '%s'\n", *itemId, alertEngine.newTopBidExchangeName)
 	// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
 	err = alertEngine.ch.PublishWithContext(ctx,
-		alertEngine.auctionEndExchangeName, // exchange
-		"",                                 // routing key WITH QUEUE q.Name
-		false,                              // mandatory
-		false,                              // immediate
+		alertEngine.newTopBidExchangeName, // exchange
+		"",                                // routing key WITH QUEUE q.Name
+		false,                             // mandatory
+		false,                             // immediate
 		amqp.Publishing{
 			ContentType:  "application/json",
 			Body:         body,
@@ -212,7 +218,7 @@ func (alertEngine *RabbitMQAlertEngine) sendAuctionEndAlert(auctionData *Auction
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 
-	log.Printf("[AlertEngine] Sending Auction data to RabbitMQ (item_id=%s)\n", auctionData.Item.ItemId)
+	log.Printf("[AlertEngine] Sending Auction data (item_id=%s) to RabbitMQ exchange '%s'\n", auctionData.Item.ItemId, alertEngine.auctionEndExchangeName)
 	// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
 	err = alertEngine.ch.PublishWithContext(ctx,
 		alertEngine.auctionEndExchangeName, // exchange
