@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"              // acquired by doing 'go get github.com/gorilla/mux.git'
 	_ "github.com/lib/pq"                 // postgres
 	amqp "github.com/rabbitmq/amqp091-go" // acquired by doing 'go get github.com/rabbitmq/amqp091-go'
+	// go get -u github.com/jkeys089/jserial
 )
 
 func homePage(w http.ResponseWriter, r *http.Request) {
@@ -1187,7 +1188,7 @@ func handleUserActivation(auctionservice *AuctionService, conn *amqp.Connection,
 					userId = fmt.Sprintf("%v", v)
 					gotUserId = true
 				}
-				if strings.ToLower(k) == "isactive" {
+				if strings.ToLower(k) == "active" { // anomally; this
 					isActive = v.(bool)
 					gotIsActive = true
 				}
@@ -1213,7 +1214,7 @@ func handleUserActivation(auctionservice *AuctionService, conn *amqp.Connection,
 		}
 	}()
 
-	log.Printf("[handleUserActivation] [*] Waiting for RabbitMQ messages. To exit press CTRL+C")
+	log.Printf("[handleUserActivation] [*] Waiting for RabbitMQ messages. To exit press CTRL+C\n")
 	<-forever
 }
 
@@ -1338,7 +1339,7 @@ func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, Use
 		false,
 		nil,
 	)
-	failOnError(err, "Failed to bind queue for ItemCounterfeit")
+	failOnError(err, "Failed to bind queue for User.Delete")
 
 	// fmt.Printf("q.Name: %s\n", q.Name)
 	msgs, err := ch.Consume(
@@ -1356,14 +1357,59 @@ func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, Use
 
 	go func() {
 		for d := range msgs {
-			log.Printf("[main] [.] received User.UserDelete event: \n%s", d.Body)
-			// characterize
 
-			// var requestBody UserDeleteEvent
+			log.Printf("[main] [.] received User.Delete event: \n")
+			// fmt.Println("content_type=%s", d.ContentEncoding)
+			// fmt.Println("decoding payload as if content_type=application/x-java-serialized-object")
+			// fmt.Println("body=\n", d.Body)
+			// // characterize
 
-			// err := json.Unmarshal([]byte(t.ResponseBody), &msgMapTemplate)
-			// t.AssertEqual(err, nil)
-			// msgMap := msgMapTemplate.(map[string]interface{})
+			// // var requestBody UserDeleteEvent
+
+			// // err := json.Unmarshal([]byte(t.ResponseBody), &msgMapTemplate)
+			// // t.AssertEqual(err, nil)
+			// // msgMap := msgMapTemplate.(map[string]interface{})
+			// contents, err := jserial.ParseSerializedObject(d.Body)
+			// if err != nil {
+			// 	log.Fatalf("%+v", err)
+			// }
+			// fmt.Println(contents)
+			// fmt.Println()
+
+			// objects, err := jserial.ParseSerializedObjectMinimal(d.Body)
+			// if err != nil {
+			// 	log.Fatalf("%+v", err)
+			// }
+
+			// var isActive bool
+			// var userId string
+			// var gotIsActive bool
+			// var gotUserId bool
+			// for k, v := range objects {
+			// 	fmt.Println(k, " : ", v)
+			// 	contents := v.(map[string]interface{})
+			// 	for key, val := range contents {
+			// 		if strings.ToLower(key) == "userid" {
+			// 			userId = fmt.Sprintf("%v", v)
+			// 			gotUserId = true
+			// 			fmt.Println("userId=", userId)
+			// 		}
+			// 		if strings.ToLower(key) == "isactive" {
+			// 			isActive = val.(bool)
+			// 			gotIsActive = true
+			// 			fmt.Println("isActive=", isActive)
+			// 		}
+			// 	}
+			// }
+
+			// if !(gotUserId && gotIsActive) {
+			// 	log.Println("[main] didn't collect all arguments I was expecting to collect from body (payload) in User.Delete event:")
+			// 	fmt.Println("isActive=", isActive)
+			// 	fmt.Println("userId=", userId)
+			// 	continue
+			// }
+
+			// ORIGINAL
 			var msgMapTemplate interface{}
 
 			// json.NewDecoder(bytes.NewBuffer(d.Body)).Decode(&requestBody)
@@ -1374,6 +1420,11 @@ func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, Use
 				continue
 			}
 			msgMap := msgMapTemplate.(map[string]interface{})
+
+			// e.g.
+			// {
+			// 	"userId":"21308hiuoshrgaewfdsv"
+			// }
 
 			var userId string
 			var gotUserId bool
@@ -1395,6 +1446,7 @@ func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, Use
 			log.Printf("[main] reacting to User.Delete event...\n")
 			numAuctionsWBidUpdates := auctionservice.DeactivateUserBids(userId)
 			log.Printf("[main] deactivated %d bids \n", numAuctionsWBidUpdates)
+			//
 
 			// var msg string
 			// switch {
