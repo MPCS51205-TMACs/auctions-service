@@ -127,6 +127,7 @@ func (auctionservice *AuctionService) CancelAuction(itemId string, requesterUser
 	// confirm the person requesting an auction be canceled is the seller of the item
 	if relevantAuction.Item.SellerUserId != requesterUserId {
 		log.Printf("[AuctionService] fail. Requester trying to cancel is not seller of itemId=%s", itemId)
+		fmt.Println("AuctionService thinks seller is = '%s'; requester is '%s'", relevantAuction.Item.SellerUserId, requesterUserId)
 		// log.Printf("[AuctionService] UNLOCK")
 		auctionservice.mutex.Unlock()
 		return auctionCancellationRequesterIsNotSeller
