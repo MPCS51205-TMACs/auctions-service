@@ -127,7 +127,7 @@ func getAuction(auctionservice *AuctionService) http.HandlerFunc {
 
 		// auction.ToAuctionData()
 		if auction == nil {
-			http.Error(w, fmt.Sprintf("did not find auction for itemid='%s'", itemId), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("did not find auction for itemid='%s'", itemId), http.StatusNotFound)
 			return
 		}
 
