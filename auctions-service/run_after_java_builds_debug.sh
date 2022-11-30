@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# until [ "$(curl -w '%{response_code}' --no-keepalive -o /dev/null --connect-timeout 1 http://user-service:8080/manager/text/list)" == "404" ];
+# do echo --- sleeping for 1 second;
+# sleep 1;
+# done
+
 until [ "$(curl -w '%{response_code}' --no-keepalive -o /dev/null --connect-timeout 1 http://user-service:8080/manager/text/list)" -eq "404" ]
 do 
     echo "waiting for user-service to be up... sleeping for 1 second";
@@ -31,4 +36,7 @@ echo
 echo
 echo "java services done building..."
 echo 
-./main inmemory
+
+cd /go/src/auctions-service-debug/main
+go run . inmemory
+

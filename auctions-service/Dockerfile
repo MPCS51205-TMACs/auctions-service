@@ -9,5 +9,7 @@ WORKDIR /go/bin/auctions-service
 
 ADD ./run_after_java_builds.sh /run_after_java_builds.sh
 RUN chmod +x /run_after_java_builds.sh
+ADD ./run_after_java_builds_debug.sh /run_after_java_builds_debug.sh
+RUN chmod +x /run_after_java_builds_debug.sh
 
 CMD ["./main", "sql"]
