@@ -21,10 +21,10 @@ func failOnError(err error, msg string) {
 
 func fillReposWDummyData(bidRepo domain.BidRepository, auctionRepo domain.AuctionRepository) []*domain.Auction {
 	// fill bid repo with some bids
-	time1 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)
-	time2 := time.Date(2014, 2, 4, 00, 00, 00, 0, time.UTC)    // same as time1
-	time3 := time.Date(2014, 2, 4, 00, 00, 00, 1000, time.UTC) // 1 microsecond after
-	time4 := time.Date(2014, 2, 4, 00, 00, 01, 0, time.UTC)    // 1 sec after
+	time1 := time.Now()
+	time2 := time1                                          // same as time1
+	time3 := time1.Add(time.Duration(1) * time.Microsecond) // 1 microsecond after
+	time4 := time1.Add(time.Duration(1) * time.Second)      // 1 sec after
 	bid1 := *domain.NewBid("101", "20", "asclark109", time1, int64(300), true)
 	bid2 := *domain.NewBid("102", "20", "mcostigan9", time2, int64(300), true)
 	bid3 := *domain.NewBid("103", "20", "katharine2", time3, int64(400), true)
@@ -34,8 +34,8 @@ func fillReposWDummyData(bidRepo domain.BidRepository, auctionRepo domain.Auctio
 	bidRepo.SaveBid(&bid3)
 	bidRepo.SaveBid(&bid4)
 
-	startime := time.Date(2014, 2, 4, 01, 00, 00, 0, time.UTC)
-	endtime := time.Date(2014, 2, 4, 01, 30, 00, 0, time.UTC)                    // 30 min later
+	startime := time1.Add(-time.Duration(1) * time.Hour)
+	endtime := time1.Add(time.Duration(10) * time.Hour)
 	item1 := domain.NewItem("101", "asclark109", startime, endtime, int64(2000)) // $20 start price
 	item2 := domain.NewItem("102", "asclark109", startime, endtime, int64(2000)) // $20 start price
 	auction1 := auctionRepo.NewAuction(item1, nil, nil, false, false, nil)       // will go to completion
@@ -50,8 +50,8 @@ func fillReposWDummyData(bidRepo domain.BidRepository, auctionRepo domain.Auctio
 	item4 := domain.NewItem("104", "asclark109", nowtime, latertime2, int64(2000)) // $20 start price
 	auctionactive2 := auctionRepo.NewAuction(item4, nil, nil, false, false, nil)
 
-	canceled := auction2.Cancel(time.Now())
-	finalized := auction2.Finalize(time.Now())
+	canceled := auction2.Cancel(startime)
+	finalized := auction2.Finalize(startime.Add(time.Duration(1) * time.Second))
 	fmt.Println(canceled)
 	fmt.Println(finalized)
 
@@ -146,17 +146,17 @@ func main() {
 	auction := auctions[0] // not canceled, not finalized, has a few bids
 
 	// SEND AUCTION.NEW-TOP-BID
-	// send_new_high_bid(auction, alertEngine)
+	send_new_high_bid(auction, alertEngine)
 
 	// SEND AUCTION.START-SOON
-	// send_start_soon(auction, alertEngine)
+	send_start_soon(auction, alertEngine)
 
 	// // SEND AUCTION.END-SOON
 	send_end_soon(auction, alertEngine)
 
 	// // SEND AUCTION.END
-	// auction2 := auctions[1] // canceled and finalized
-	// send_end(auction2, alertEngine)
+	auction2 := auctions[1] // canceled and finalized
+	send_end(auction2, alertEngine)
 }
 
 func send_new_high_bid(auction *domain.Auction, alertEngine domain.AlertEngine) {
@@ -171,17 +171,17 @@ func send_new_high_bid(auction *domain.Auction, alertEngine domain.AlertEngine) 
 func send_start_soon(auction *domain.Auction, alertEngine domain.AlertEngine) {
 	var itemId *string = &auction.Item.ItemId
 	startTime := auction.Item.StartTime
-	// endTime := auction.Item.StartTime
+	endTime := auction.Item.EndTime
 	msg := "dummy msg"
-	alertEngine.SendAuctionStartSoonAlert(msg, *itemId, startTime)
+	alertEngine.SendAuctionStartSoonAlert(msg, *itemId, startTime, endTime)
 }
 
 func send_end_soon(auction *domain.Auction, alertEngine domain.AlertEngine) {
 	var itemId *string = &auction.Item.ItemId
-	// startTime := auction.Item.StartTime
-	endTime := auction.Item.StartTime
+	startTime := auction.Item.StartTime
+	endTime := auction.Item.EndTime
 	msg := "dummy msg"
-	alertEngine.SendAuctionEndSoonAlert(msg, *itemId, endTime)
+	alertEngine.SendAuctionEndSoonAlert(msg, *itemId, startTime, endTime)
 }
 
 func send_end(auction *domain.Auction, alertEngine domain.AlertEngine) {

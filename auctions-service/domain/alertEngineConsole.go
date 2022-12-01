@@ -15,13 +15,13 @@ func NewConsoleAlertEngine() *ConsoleAlertEngine {
 	return &ConsoleAlertEngine{}
 }
 
-func (alertEngine *ConsoleAlertEngine) SendAuctionStartSoonAlert(msg, itemId string, timeUntilStart time.Time) {
+func (alertEngine *ConsoleAlertEngine) SendAuctionStartSoonAlert(msg, itemId string, startTime, endTime time.Time) {
 	log.Printf("[AlertEngine] Sending AuctionStartingSoon Alert to Console (item_id=%s)\n", itemId)
 	alertEngine.sendToConsole(msg)
 	log.Printf("[AlertEngine] [x] Sent AuctionStartingSoon Alert (item_id=%s)\n", itemId)
 }
 
-func (alertEngine *ConsoleAlertEngine) SendAuctionEndSoonAlert(msg, itemId string, timeUntilEnd time.Time) {
+func (alertEngine *ConsoleAlertEngine) SendAuctionEndSoonAlert(msg, itemId string, startTime, endTime time.Time) {
 	log.Printf("[AlertEngine] Sending AuctionEndingSoon Alert to Console (item_id=%s)\n", itemId)
 	alertEngine.sendToConsole(msg)
 	log.Printf("[AlertEngine] [x] Sent AuctionEndingSoon Alert (item_id=%s)\n", itemId)

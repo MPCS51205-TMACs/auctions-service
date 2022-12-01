@@ -108,11 +108,13 @@ func NewRabbitMQAlertEngine(
 
 // func (auction *RabbitMQAlertEngine) ConnectToRabbit
 
-func (alertEngine *RabbitMQAlertEngine) SendAuctionStartSoonAlert(msg string, itemId string, startTime time.Time) {
+func (alertEngine *RabbitMQAlertEngine) SendAuctionStartSoonAlert(msg string, itemId string, startTime, endTime time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	body, err := json.Marshal(msg)
+	alert := NewAuctionTimeAlert(itemId, startTime, endTime, msg)
+
+	body, err := json.Marshal(alert)
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 
@@ -136,11 +138,13 @@ func (alertEngine *RabbitMQAlertEngine) SendAuctionStartSoonAlert(msg string, it
 	log.Printf("[AlertEngine] [x] Sent AuctionStartingSoon Alert (item_id=%s)\n", itemId)
 }
 
-func (alertEngine *RabbitMQAlertEngine) SendAuctionEndSoonAlert(msg string, itemId string, endTime time.Time) {
+func (alertEngine *RabbitMQAlertEngine) SendAuctionEndSoonAlert(msg string, itemId string, startTime, endTime time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	body, err := json.Marshal(msg)
+	alert := NewAuctionTimeAlert(itemId, startTime, endTime, msg)
+	body, err := json.Marshal(alert)
+
 	// fmt.Println(body)
 	failOnError(err, "[AlertEngine] Error encoding JSON")
 

@@ -45,13 +45,15 @@ type AuctionTimeAlert struct {
 	ItemId    string
 	StartTime time.Time
 	EndTime   time.Time
+	Msg       string
 }
 
-func NewAuctionTimeAlert(ItemId string, StartTime, EndTime time.Time) *AuctionTimeAlert {
+func NewAuctionTimeAlert(ItemId string, StartTime, EndTime time.Time, Msg string) *AuctionTimeAlert {
 	return &AuctionTimeAlert{
 		ItemId:    ItemId,
 		StartTime: StartTime,
 		EndTime:   EndTime,
+		Msg:       Msg,
 	}
 }
 
@@ -60,10 +62,12 @@ func (alert *AuctionTimeAlert) MarshalJSON() ([]byte, error) {
 		ItemId    string `json:"item_id"`
 		StartTime string `json:"start_time"`
 		EndTime   string `json:"end_time"`
+		Msg       string `json:"message"`
 	}{
 		ItemId:    alert.ItemId,
 		StartTime: common.TimeToSQLTimestamp6(alert.StartTime),
 		EndTime:   common.TimeToSQLTimestamp6(alert.EndTime),
+		Msg:       alert.Msg,
 	})
 }
 
@@ -435,10 +439,10 @@ func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 			if hours < 1 { // send alert if auction is active and end is within 1 hour from now
 				if mins < 60 {
 					msg := fmt.Sprintf("[%s] Auction for item_id=%s starts in (%f minutes)\n", nowTimeStr, auction.Item.ItemId, mins)
-					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 				} else {
 					msg := fmt.Sprintf("[%s] Auction for item_id=%s starts in (%f hours)\n", nowTimeStr, auction.Item.ItemId, hours)
-					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+					auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 				}
 
 				auction.sentStartSoonAlert = true
@@ -453,10 +457,10 @@ func (auction *Auction) SendStartSoonAlertIfApplicable() bool {
 
 			if mins < 60 {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s; auction started (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
-				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			} else {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s; auction started (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
-				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionStartSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			}
 
 			auction.sentStartSoonAlert = true
@@ -526,10 +530,10 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 
 				if mins < 60 {
 					msg := fmt.Sprintf("[%s] Auction for item_id=%s ends in (%f minutes)\n", nowTimeStr, auction.Item.ItemId, mins)
-					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 				} else {
 					msg := fmt.Sprintf("[%s] Auction for item_id=%s ends in (%f hours)\n", nowTimeStr, auction.Item.ItemId, hours)
-					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+					auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 				}
 
 				auction.sentEndSoonAlert = true
@@ -543,10 +547,10 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 
 			if mins < 60 {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s ended (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			} else {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s ended (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			}
 
 			auction.sentEndSoonAlert = true
@@ -560,10 +564,10 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 
 			if mins < 60 {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s was canceled (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			} else {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s was canceled (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			}
 
 			auction.sentEndSoonAlert = true
@@ -577,10 +581,10 @@ func (auction *Auction) SendEndSoonAlertIfApplicable() bool {
 
 			if mins < 60 {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s was finalized (%f minutes) ago!\n", nowTimeStr, auction.Item.ItemId, mins)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			} else {
 				msg := fmt.Sprintf("[%s] Auction for item_id=%s was finalized (%f hours) ago!\n", nowTimeStr, auction.Item.ItemId, hours)
-				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime)
+				auction.alertEngine.SendAuctionEndSoonAlert(msg, auction.Item.ItemId, auction.Item.StartTime, auction.Item.EndTime)
 			}
 
 			auction.sentEndSoonAlert = true
