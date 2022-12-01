@@ -207,7 +207,7 @@ func (auctionservice *AuctionService) StopAuction(itemId string) AuctionInteract
 		return auctionNotExist
 	}
 
-	// assume client code confirmed requester is an admin
+	// delegate security to main.go; assume main.go confirmed requester is an admin
 
 	// confirm auction isn't already finalized
 	if relevantAuction.HasFinalization() {

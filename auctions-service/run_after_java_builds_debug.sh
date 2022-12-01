@@ -38,5 +38,5 @@ echo "java services done building..."
 echo 
 
 cd /go/src/auctions-service-debug/main
-go run . inmemory
+go run . sql
 

@@ -31,4 +31,4 @@ echo
 echo
 echo "java services done building..."
 echo 
-./main inmemory
+./main sql

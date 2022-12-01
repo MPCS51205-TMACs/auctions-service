@@ -3,6 +3,7 @@ module auctions-service
 go 1.16
 
 require (
+	github.com/golang-jwt/jwt/v4 v4.4.3 // indirect
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/jkeys089/jserial v1.0.1 // indirect

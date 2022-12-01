@@ -3,6 +3,7 @@ package main
 import (
 	"auctions-service/common"
 	"auctions-service/domain"
+	"auctions-service/security"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	_ "github.com/lib/pq"                 // postgres
 	amqp "github.com/rabbitmq/amqp091-go" // acquired by doing 'go get github.com/rabbitmq/amqp091-go'
 	// go get -u github.com/jkeys089/jserial
+	// go get -u github.com/golang-jwt/jwt/v4
 )
 
 func homePage(w http.ResponseWriter, r *http.Request) {
@@ -192,13 +194,32 @@ func getActiveAuctions(auctionservice *AuctionService) http.HandlerFunc {
 
 }
 
-func stopAuction(auctionservice *AuctionService) http.HandlerFunc {
+func stopAuction(auctionservice *AuctionService, authenticator *security.Authenticator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		itemId := vars["itemId"]
 
 		// var requestBody RequestStopAuction // parse request into a struct with assumed structure
 		var response ResponseStopAuction
+
+		// first, verify bearer token is that for an admin; if can't be validated throw 401
+		reqToken := r.Header.Get("Authorization")
+		splitToken := strings.Split(reqToken, "Bearer ")
+		if len(splitToken) != 2 {
+			// Error: Bearer token not in proper format
+			response.Msg = "Bearer token format was unexpected. see main.go stopAuction()"
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		reqToken = splitToken[1]
+		isAdmin := authenticator.IsAdmin(reqToken)
+		if !isAdmin {
+			response.Msg = "Bearer token was not validated as an admin. aborting stopAuction()"
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+			return
+		} // is authorized
 
 		w.Header().Set("Content-Type", "application/json")
 
@@ -1469,7 +1490,7 @@ func handleUserDelete(auctionservice *AuctionService, conn *amqp.Connection, Use
 	<-forever
 }
 
-func handleHTTPAPIRequests(auctionservice *AuctionService, conn *amqp.Connection, newBidExchangeName, newBidQueueName string) {
+func handleHTTPAPIRequests(auctionservice *AuctionService, conn *amqp.Connection, newBidExchangeName, newBidQueueName string, authenticator *security.Authenticator) {
 	// creates a new instance of a mux router
 	myRouter := mux.NewRouter().StrictSlash(true)
 	// replace http.HandleFunc with myRouter.HandleFunc
@@ -1493,7 +1514,7 @@ func handleHTTPAPIRequests(auctionservice *AuctionService, conn *amqp.Connection
 	// myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createAndProcessNewBid(auctionservice, newBidExchangeName, newBidQueueName)).Methods("POST") ORIGINAL; did everything
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createNewBid(auctionservice, ch, newBidExchangeName, newBidQueueName)).Methods("POST")
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/cancelAuction/{itemId}", apiVersion), cancelAuction(auctionservice))
-	myRouter.HandleFunc(fmt.Sprintf("/api/%s/stopAuction/{itemId}", apiVersion), stopAuction(auctionservice))
+	myRouter.HandleFunc(fmt.Sprintf("/api/%s/stopAuction/{itemId}", apiVersion), stopAuction(auctionservice, authenticator))
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/ItemsUserHasBidsOn/{userId}", apiVersion), getItemsUserHasBidsOn(auctionservice)).Methods("GET")
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/activeAuctions/", apiVersion), getActiveAuctions(auctionservice)).Methods("GET")
 	// get active auctions
@@ -1569,6 +1590,9 @@ func main() {
 
 	// RABBITMQ PARAMS
 	// parameters below need to be manually changed with deployment
+	// note: variables names below may need refactoring or deletion;
+	// some are unused (e.g. publishing to an exchange does need knowledge of a binding queue),
+	// and sometimes these variables are put into the arguments for routing keys. needed refactor.
 	rabbitMQContainerHostName := "rabbitmq-server"
 	rabbitMQContainerPort := "5672"
 
@@ -1606,12 +1630,12 @@ func main() {
 
 	// intialize OUTBOUND ADAPTER (AlertEngine)
 	// AlertEngine holds methods for sending msgs outbound from the context;
-	// Auctions hold a reference to a single AlertEngine, which they use to send msgs outbound (e.g. to RabbitMQ)
+	// Auctions hold a reference to a single AlertEngine, which they share, which they use to send msgs outbound (e.g. to RabbitMQ)
 	useStubbedAlertEngine := false // MANUALLY CHANGE; if true, sends msgs to console instead; if false, sends msgs to RabbitMQ/Contexts
 
 	var alertEngine domain.AlertEngine
 
-	// typical to have 1 RabbitMQ connection per application
+	// typical to have 1 RabbitMQ connection per application, 1 channel per thread, and only 1 thread publishing/subscribing at any moment
 	connStr := fmt.Sprintf("amqp://guest:guest@%s:%s/", rabbitMQContainerHostName, rabbitMQContainerPort)
 	var err error
 	conn, err = amqp.Dial(connStr)
@@ -1667,6 +1691,11 @@ func main() {
 
 	log.Printf("Auctions Service API v1.0 - [Mux Routers impl for HTTP/RESTful API; RabbitMQ for messaging]")
 
+	// intialize authenticator (to analyze jwt tokens)
+	secret := "G+KbPeShVmYq3t6w9z$C&F)J@McQfTjW"
+	jwtParser := security.NewJwtParser(secret)
+	authenticator := security.NewAuthenticator(jwtParser) // to verify stopAuction calls
+
 	// initialize AUCTION-SERVICE
 	auctionservice := NewAuctionService(bidRepo, auctionRepo)
 
@@ -1690,7 +1719,7 @@ func main() {
 	auctionSessionManager.TurnOn() // starts the periodic invocation of auctionservice
 
 	// spawn goroutines that will invoke auctionservice upon incoming HTTP/RESTful requests
-	go handleHTTPAPIRequests(auctionservice, conn, newBidExchangeName, newBidQueueName)
+	go handleHTTPAPIRequests(auctionservice, conn, newBidExchangeName, newBidQueueName, authenticator)
 
 	// spawn goroutines that will invoke auctionservice upon incoming RabbitMQ messages
 
