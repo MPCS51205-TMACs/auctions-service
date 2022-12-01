@@ -27,7 +27,7 @@ func (alertEngine *ConsoleAlertEngine) SendAuctionEndSoonAlert(msg, itemId strin
 	log.Printf("[AlertEngine] [x] Sent AuctionEndingSoon Alert (item_id=%s)\n", itemId)
 }
 
-func (alertEngine *ConsoleAlertEngine) sendAuctionEndAlert(auctionData *AuctionData) {
+func (alertEngine *ConsoleAlertEngine) SendAuctionEndAlert(auctionData *AuctionData) {
 	log.Printf("[AlertEngine] Sending AuctionData to Console (item_id=%s)\n", auctionData.Item.ItemId)
 	msg := fmt.Sprint(auctionData)
 	alertEngine.sendToConsole(msg)

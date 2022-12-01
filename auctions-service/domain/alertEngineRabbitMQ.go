@@ -147,10 +147,10 @@ func (alertEngine *RabbitMQAlertEngine) SendAuctionEndSoonAlert(msg string, item
 	log.Printf("[AlertEngine] Sending AuctionEndingSoon Alert (item_id=%s) to RabbitMQ exchange '%s'\n", itemId, alertEngine.endSoonExchangeName)
 	// log.Printf("[AlertEngine] Sending Auction data to RabbitMQ: %s\n", body)
 	err = alertEngine.ch.PublishWithContext(ctx,
-		alertEngine.startSoonExchangeName, // exchange
-		"",                                // routing key WITH QUEUE q.Name
-		false,                             // mandatory
-		false,                             // immediate
+		alertEngine.endSoonExchangeName, // exchange
+		"",                              // routing key WITH QUEUE q.Name
+		false,                           // mandatory
+		false,                           // immediate
 		amqp.Publishing{
 			ContentType:  "application/json",
 			Body:         body,
@@ -210,7 +210,7 @@ func (alertEngine *RabbitMQAlertEngine) SendNewTopBidAlert(itemId, sellerUserId,
 	log.Printf("[AlertEngine] [x] Sent (item_id=%s)\n", *itemId)
 }
 
-func (alertEngine *RabbitMQAlertEngine) sendAuctionEndAlert(auctionData *AuctionData) {
+func (alertEngine *RabbitMQAlertEngine) SendAuctionEndAlert(auctionData *AuctionData) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

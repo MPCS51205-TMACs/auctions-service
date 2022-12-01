@@ -2,6 +2,7 @@ package domain
 
 import (
 	"auctions-service/common"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -38,6 +39,32 @@ type AuctionData struct {
 	SentEndSoonAlert   bool
 	Finalization       *Finalization
 	WinningBid         *Bid
+}
+
+type AuctionTimeAlert struct {
+	ItemId    string
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+func NewAuctionTimeAlert(ItemId string, StartTime, EndTime time.Time) *AuctionTimeAlert {
+	return &AuctionTimeAlert{
+		ItemId:    ItemId,
+		StartTime: StartTime,
+		EndTime:   EndTime,
+	}
+}
+
+func (alert *AuctionTimeAlert) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		ItemId    string `json:"item_id"`
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}{
+		ItemId:    alert.ItemId,
+		StartTime: common.TimeToSQLTimestamp6(alert.StartTime),
+		EndTime:   common.TimeToSQLTimestamp6(alert.EndTime),
+	})
 }
 
 func NewAuctionData(Item *Item, Bids []*Bid, Cancellation *Cancellation, SentStartSoonAlert, SentEndSoonAlert bool, Finalization *Finalization, winningBid *Bid) *AuctionData {
@@ -361,7 +388,7 @@ func (auction *Auction) Finalize(timeWhenFinalizationIssued time.Time) bool {
 		log.Printf("[Auction %s] finalizing self...\n", auction.Item.ItemId)
 		// log.Printf("[Auction %s] sending auction data to rabbitMQ...\n", auction.Item.ItemId)
 		auction.finalization = NewFinalization(timeWhenFinalizationIssued)
-		auction.alertEngine.sendAuctionEndAlert(auction.ToAuctionData())
+		auction.alertEngine.SendAuctionEndAlert(auction.ToAuctionData())
 		// sendAuctionDataToRabbitMQ(auction)
 		return true
 	default:
