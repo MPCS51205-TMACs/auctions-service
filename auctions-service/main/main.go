@@ -342,7 +342,7 @@ func createAuction(auctionservice *AuctionService) http.HandlerFunc {
 	}
 }
 
-func createNewBid(auctionservice *AuctionService, ch *amqp.Channel, newBidExchangeName, newBidQueueName string) http.HandlerFunc {
+func createNewBid(auctionservice *AuctionService, authenticator *security.Authenticator, ch *amqp.Channel, newBidExchangeName, newBidQueueName string) http.HandlerFunc {
 
 	// // // create channel with rabbitMQ;
 	// ch, err := conn.Channel()
@@ -408,8 +408,38 @@ func createNewBid(auctionservice *AuctionService, ch *amqp.Channel, newBidExchan
 		// FINALIZED AuctionState = "FINALIZED" // is over and archived away; can delete
 		// UNKNOWN   AuctionState = "UKNOWN"
 
+		// authenticate user! (extract identity)
+		// first, verify bearer token is that for a user or admin; if can't be validated throw 401
+		reqToken := r.Header.Get("Authorization")
+		splitToken := strings.Split(reqToken, "Bearer ")
+		if len(splitToken) != 2 {
+			// Error: Bearer token not in proper format
+			response.Msg = "Bearer token format was unexpected. see main.go createNewBid()"
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		reqToken = splitToken[1]
+		isUser := authenticator.IsUser(reqToken)
+		isAdmin := authenticator.IsAdmin(reqToken)
+		if !(isAdmin || isUser) {
+			response.Msg = "Bearer token was not validated as an admin or user. aborting createNewBid()"
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+			return
+		} // is authorized
+		// extract user id
+		bidderUserId, gotErrs := authenticator.ExtractUserId(reqToken)
+		if gotErrs {
+			// Error: had trouble extracting userid
+			response.Msg = "Bearer token format was unexpected. see main.go createNewBid(). could not extract userid"
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
 		itemId := requestBody.ItemId
-		bidderUserId := requestBody.BidderUserId
+		// bidderUserId := FROM ABOVE VERIFICATION
 		timeReceived := time.Now()
 		amountInCents := requestBody.AmountInCents
 
@@ -422,6 +452,8 @@ func createNewBid(auctionservice *AuctionService, ch *amqp.Channel, newBidExchan
 		}
 
 		auctionState, isAcceptableBid := auctionservice.ValidateBid(itemId, bidderUserId, timeReceived, amountInCents) // rarely requests lock
+		log.Println("auction state: ", auctionState)
+		log.Println("is bid acceptable: ", isAcceptableBid)
 
 		if isAcceptableBid {
 			// publish new Bid to RabbitMQ; will process bid later
@@ -487,6 +519,14 @@ func createNewBid(auctionservice *AuctionService, ch *amqp.Channel, newBidExchan
 
 		if auctionState == domain.OVER {
 			response.Msg = "auction is already over."
+			// response.WasNewTopBid = false
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if auctionState == domain.CANCELED {
+			response.Msg = "auction is already canceled."
 			// response.WasNewTopBid = false
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
@@ -1512,7 +1552,7 @@ func handleHTTPAPIRequests(auctionservice *AuctionService, conn *amqp.Connection
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Auctions/{itemId}", apiVersion), getAuction(auctionservice)).Methods("GET")
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Auctions/", apiVersion), createAuction(auctionservice)).Methods("POST")
 	// myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createAndProcessNewBid(auctionservice, newBidExchangeName, newBidQueueName)).Methods("POST") ORIGINAL; did everything
-	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createNewBid(auctionservice, ch, newBidExchangeName, newBidQueueName)).Methods("POST")
+	myRouter.HandleFunc(fmt.Sprintf("/api/%s/Bids/", apiVersion), createNewBid(auctionservice, authenticator, ch, newBidExchangeName, newBidQueueName)).Methods("POST")
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/cancelAuction/{itemId}", apiVersion), cancelAuction(auctionservice))
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/stopAuction/{itemId}", apiVersion), stopAuction(auctionservice, authenticator))
 	myRouter.HandleFunc(fmt.Sprintf("/api/%s/ItemsUserHasBidsOn/{userId}", apiVersion), getItemsUserHasBidsOn(auctionservice)).Methods("GET")

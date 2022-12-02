@@ -43,6 +43,9 @@ func (jwtParser *JwtParser) Parse(tokenString string) (map[string]interface{}, e
 		// hmacSampleSecret is a []byte containing your secret, e.g. []byte("my_secret_key")
 		return jwtParser.secretAsBytes, nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	payload := map[string]interface{}{}
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
@@ -135,4 +138,18 @@ func (authenticator *Authenticator) MeetsRequirements(tokenString string, mustBe
 		meetsRequirements = false
 	}
 	return meetsRequirements
+}
+
+func (authenticator *Authenticator) ExtractUserId(tokenString string) (string, bool) {
+	payload, err := authenticator.extractDetails(tokenString)
+	if err != nil {
+		return "", true // trivial fail
+	}
+	for key, val := range payload {
+		if key == "sub" {
+			userId := val.(string)
+			return userId, false
+		}
+	}
+	return "", true
 }
