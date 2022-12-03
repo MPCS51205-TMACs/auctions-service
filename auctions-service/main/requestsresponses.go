@@ -1,6 +1,9 @@
 package main
 
-import "auctions-service/domain"
+import (
+	"auctions-service/domain"
+	"time"
+)
 
 type ResponseGetItemsByUserId struct {
 	// could optionally include the userId here as well e.g.
@@ -69,6 +72,7 @@ type JsonAuction struct {
 	EndTime           string `json:"endtime"`
 	StartPriceInCents int64  `json:"startpriceincents"`
 	TopBid            *domain.Bid
+	State             domain.AuctionState `json:"state"`
 }
 
 func ExportAuction(auction *domain.Auction) *JsonAuction {
@@ -80,6 +84,7 @@ func ExportAuction(auction *domain.Auction) *JsonAuction {
 		StartTime:         auction.Item.StartTime.Format(layout),
 		EndTime:           auction.Item.EndTime.Format(layout),
 		TopBid:            auction.GetHighestActiveBid(),
+		State:             auction.GetStateAtTime(time.Now()),
 	}
 }
 

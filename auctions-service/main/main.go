@@ -148,10 +148,10 @@ func getAuctions(auctionservice *AuctionService) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		activeAuctions := auctionservice.GetAuctions()
+		auctions := auctionservice.GetAuctions()
 
-		exportedAuctions := make([]JsonAuction, len(*activeAuctions))
-		for i, activeAuction := range *activeAuctions {
+		exportedAuctions := make([]JsonAuction, len(*auctions))
+		for i, activeAuction := range *auctions {
 			exportedAuctions[i] = *ExportAuction(activeAuction)
 		}
 
